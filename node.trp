@@ -1,6 +1,6 @@
 import lists
 let 
-    fun node other_nodes id = 
+    fun node other_nodes id leader loops = 
         let fun send_to_all processes msg = 
             let fun send_and_loop h t =
                     let val _ = send(h, msg)
@@ -10,31 +10,34 @@ let
                     [] => ()
                     | h :: t => send_and_loop h t
                 end
-                fun timeout () = 
-                    let val time = 1000 + ((random ()) * 5000)
-                        val _ = sleep time
-                        val seconds = time / 1000
-                in print seconds
-                end
-                fun heartbeat_all () = send_to_all other_nodes ("HEARTBEAT", id)
-        in receive [hn ("ADD_NODE", x) => node (append other_nodes [x]) id,
-                    hn ("ADD_NODES", x) => node (append other_nodes x) id,
+            fun timeout cb = 
+                let val time = 1000 + ((random ()) * 100)
+                    val _ = print cb
+                    val _ = sleep time
+                    val seconds = time / 1000
+            in send(cb, ("TIMEOUT", loops))
+            end
+            fun heartbeat_all () = send_to_all other_nodes ("HEARTBEAT", id)
+            val pr_id = self()
+            val _ = spawn (fn() => timeout pr_id)
+        in receive [hn ("ADD_NODE", x) => node (append other_nodes [x]) id leader (loops + 1),
+                    hn ("ADD_NODES", x) => node (append other_nodes x) id leader (loops + 1),
                     hn ("SEND_HEARTBEAT") => 
                         let val _ = printString (id ^ ":sending heartbeat")
                             val _ = spawn heartbeat_all
-                        in node other_nodes id
+                        in node other_nodes id leader (loops + 1)
                         end,
                     hn ("HEARTBEAT", x) => 
                         let val _ = printString (id ^ ":received heartbeat from '"^x^"'")
-                        in node other_nodes id
+                        in node other_nodes id leader (loops + 1)
+                        end,
+                    hn ("TIMEOUT", x) =>
+                        let val _ = print x
+                        in if x = loops then
+                            printString (id^": START ELECTION")
+                        else node other_nodes id leader loops
                         end]
         end
-    val node1 = spawn (fn() => node [] "1")
-    val node2 = spawn (fn() => node [node1] "2")
-    val node3 = spawn (fn() => node [node1, node2] "3")
-    val _ = send(node1, ("ADD_NODES", [node2, node3]))
-    val _ = send(node2, ("ADD_NODE", node3))
-    val _ = send(node1, "SEND_HEARTBEAT")
-    val _ = send(node2, "SEND_HEARTBEAT")
-in send(node3, "SEND_HEARTBEAT")
+    val node1 = spawn (fn() => node [] "1" false 0)
+in send(node1, ("ADD_NODE", spawn (fn() => node [node1] "2" false 0)))
 end
