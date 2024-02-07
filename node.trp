@@ -11,7 +11,7 @@ let
                     | h :: t => send_and_loop h t
                 end
             fun timeout cb = 
-                let val time = 1000 + ((random ()) * 100)
+                let val time = 1000 + ((random ()) * 10000)
                     val _ = sleep time
                     val seconds = time / 1000
             in send(cb, ("TIMEOUT", loops))
@@ -36,5 +36,8 @@ let
                         else node other_nodes id leader loops]
         end
     val node1 = spawn (fn() => node [] "1" false 0)
-in send(node1, ("ADD_NODE", spawn (fn() => node [node1] "2" false 0)))
+    val node2 = spawn (fn() => node [node1] "2" false 0)
+    val node3 = spawn (fn() => node [node1, node2] "3" false 0)
+    val _ = send(node1, ("ADD_NODES", [node2, node3]))
+in send(node2, ("ADD_NODE", node3))
 end
