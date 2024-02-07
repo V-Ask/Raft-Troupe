@@ -31,7 +31,7 @@ let
                         in node other_nodes id leader (loops + 1)
                         end,
                     hn ("TIMEOUT", x) =>
-                        in if x = loops then
+                        if x = loops then
                             printString (id^": START ELECTION")
                         else node other_nodes id leader loops
                         end]
