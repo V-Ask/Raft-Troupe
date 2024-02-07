@@ -33,8 +33,7 @@ let
                     hn ("TIMEOUT", x) =>
                         if x = loops then
                             printString (id^": START ELECTION")
-                        else node other_nodes id leader loops
-                        end]
+                        else node other_nodes id leader loops]
         end
     val node1 = spawn (fn() => node [] "1" false 0)
 in send(node1, ("ADD_NODE", spawn (fn() => node [node1] "2" false 0)))
