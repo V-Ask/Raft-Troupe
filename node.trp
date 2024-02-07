@@ -12,7 +12,6 @@ let
                 end
             fun timeout cb = 
                 let val time = 1000 + ((random ()) * 100)
-                    val _ = print cb
                     val _ = sleep time
                     val seconds = time / 1000
             in send(cb, ("TIMEOUT", loops))
@@ -32,7 +31,6 @@ let
                         in node other_nodes id leader (loops + 1)
                         end,
                     hn ("TIMEOUT", x) =>
-                        let val _ = print x
                         in if x = loops then
                             printString (id^": START ELECTION")
                         else node other_nodes id leader loops
