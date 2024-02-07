@@ -1,1 +1,40 @@
-printString "I am a node!"
+import lists
+let 
+    fun node other_nodes id = 
+        let fun send_to_all processes msg = 
+            let fun send_and_loop h t =
+                    let val _ = send(h, msg)
+                    in send_to_all t msg
+                    end
+                in case processes of
+                    [] => ()
+                    | h :: t => send_and_loop h t
+                end
+                fun timeout () = 
+                    let val time = 1000 + ((random ()) * 5000)
+                        val _ = sleep time
+                        val seconds = time / 1000
+                in print seconds
+                end
+                fun heartbeat_all () = send_to_all other_nodes ("HEARTBEAT", id)
+        in receive [hn ("ADD_NODE", x) => node (append other_nodes [x]) id,
+                    hn ("ADD_NODES", x) => node (append other_nodes x) id,
+                    hn ("SEND_HEARTBEAT") => 
+                        let val _ = printString (id ^ ":sending heartbeat")
+                            val _ = spawn heartbeat_all
+                        in node other_nodes id
+                        end,
+                    hn ("HEARTBEAT", x) => 
+                        let val _ = printString (id ^ ":received heartbeat from '"^x^"'")
+                        in node other_nodes id
+                        end]
+        end
+    val node1 = spawn (fn() => node [] "1")
+    val node2 = spawn (fn() => node [node1] "2")
+    val node3 = spawn (fn() => node [node1, node2] "3")
+    val _ = send(node1, ("ADD_NODES", [node2, node3]))
+    val _ = send(node2, ("ADD_NODE", node3))
+    val _ = send(node1, "SEND_HEARTBEAT")
+    val _ = send(node2, "SEND_HEARTBEAT")
+in send(node3, "SEND_HEARTBEAT")
+end
