@@ -1,9 +1,13 @@
 import lists
 let 
-    fun list_length list = 
+    fun contains element list = 
         case list of
-        [] => 0
-        | _ :: t => 1 + list_length t
+        [] => false
+        | h :: t =>
+            if h = element then true
+            else contains element t
+
+    fun not a = a = false
 
     fun send_to_all processes msg sender = 
         let fun send_and_loop h t =
@@ -43,23 +47,22 @@ let
     end]
     end
 
-    and candidate all_nodes id loops log term =
+    and candidate all_nodes id loops lastLogIndex lastLogTerm =
         let val p_id = self()
             val _ = printString (id^": I am now a candidate")
-            val _ = send_to_all all_nodes ("ELECTME", (p_id, log, term)) (self())
-            val req_votes = ((list_length all_nodes) / 2 + 1)
+            val _ = send_to_all all_nodes ("RequestVote", (term, cand_id, lastLogIndex, lastLogTerm)) (self())
+            val req_votes = ((length all_nodes) / 2 + 1)
             fun won_election () = 
                 let val _ = printString (id^": I won the election")
                 in leader_node all_nodes id loops log term
                 end
             
-            fun wait_for_votes acc_votes = 
-                let val _ = if acc_votes >= req_votes then won_election () else ()
+            fun wait_for_votes (follower_votes, vote_amount) = 
+                let val _ = if vote_amount >= req_votes then won_election () else ()
                 in receive [
-                    hn ("YES-VOTE", x) => 
-                        if term = x then wait_for_votes (acc_votes + 1) 
-                        else wait_for_votes acc_votes,
-                    hn ("ELECTME", (p_id, other_log, other_term)) =>
+                    hn ("YES-VOTE", follower_id) when not (contains follower_id follower_votes) => 
+                            wait_for_votes (acc_votes + 1)
+                    hn ("RequestVote", (p_id, other_log, other_term)) =>
                         if other_term > term then
                             let val _ = send(p_id, ("YES-VOTE", other_term))
                             in await_election_end all_nodes id log other_term
@@ -94,13 +97,11 @@ let
                 let val _ = printString (id ^ ":received heartbeat from '"^x^"'")
                 in loop true
                 end,
-            hn ("ELECTION-TIMEOUT", x) =>
-                if x = loops then 
-                    let val _ = printString (id^": START ELECTION")
-                    in new_candidate all_nodes id loops log term
-                    end
-                else loop false,
-            hn ("ELECTME", (p_id, c_log, c_term)) =>
+            hn ("ELECTION-TIMEOUT", x) when x = loops =>
+                let val _ = printString (id^": START ELECTION")
+                in new_candidate all_nodes id loops log term
+                end
+            hn ("RequestVote", (p_id, c_log, c_term)) =>
                 if c_term > term then
                     let val _ = send(p_id, ("YES-VOTE", c_term))
                     in await_election_end all_nodes id loops log c_term
@@ -110,7 +111,7 @@ let
                         val _ = printString (id^":voting no")
                     in loop true
                     end,
-            hn ("debug-ELECTME") =>
+            hn ("debug-RequestVote") =>
                 leader_node all_nodes id log term,
             hn x => 
                 let val _ = print x
@@ -145,5 +146,5 @@ let
             val _ = send(node1, ("ELECTION-TIMEOUT", 1))
         in send(node2, ("ELECTION-TIMEOUT", 1))
     end
-in initiate_nodes 5
+in initiate_nodes 3
 end
