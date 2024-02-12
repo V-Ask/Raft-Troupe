@@ -31,95 +31,114 @@ let
         in spawn timeout
         end
 
-    fun leader_node all_nodes id loops log term = 
-        let fun loop () = leader_node all_nodes id loops log term
-            fun heartbeat_all () = send_to_all all_nodes ("HEARTBEAT", id) (self())
-            val _ = heartbeat_all ()
-            val _ = sleep 500
-        in loop ()
+    fun leader_node all_nodes id log term = 
+        let val p_id = self()
+            fun heartbeat () = 
+                let val _ = send_to_all all_nodes ("AppendEntries", "heartbeat", id) (p_id)
+                    val _ = sleep 500
+                in heartbeat ()
+            end
+            val _ = spawn heartbeat
+            fun loop log term = 
+                let val _ = receive [
+                    hn ("SEND-MESSAGE", x) =>
+                        let val _ = print ("Sending message '"^x^"'...")
+                        in send_to_all all_nodes ("AppendEntries", x) (p_id)
+                        end]
+                in loop log term
+                end
+        in loop log term
         end
 
-    and await_election_end all_nodes id loops log term = 
+    and await_election_end all_nodes id log term c_id = 
     let val _ = printString (id^": now waiting for election to end")
-    in receive [hn ("HEARTBEAT", x) => 
-        let val _ = printString (id ^ ":received heartbeat from '"^x^"', election must be over")
-        in new_follower all_nodes id (loops + 1) log term
-    end]
+    in receive [
+        hn ("AppendEntries", _, x) => 
+            let val _ = printString (id ^ ":received AppendEntries from '"^x^"', election must be over")
+            in new_follower all_nodes id log term
+            end,
+        hn ("RequestVote", (c_term, other_c_id, c_log_index, c_log_term, p_id)) when c_id = other_c_id =>
+                let val _ = send(p_id, ("YES-VOTE", id))
+                in await_election_end all_nodes id log c_term other_c_id
+                end
+        ]
     end
 
-    and candidate all_nodes id loops lastLogIndex lastLogTerm =
+    and candidate all_nodes id log term =
         let val p_id = self()
+            val nonce = mkuuid()
             val _ = printString (id^": I am now a candidate")
-            val _ = send_to_all all_nodes ("RequestVote", (term, cand_id, lastLogIndex, lastLogTerm)) (self())
+            val _ = send_to_all all_nodes ("RequestVote", (term, id, 0, 0 (*two arguements left for logs*), p_id)) (self())
             val req_votes = ((length all_nodes) / 2 + 1)
             fun won_election () = 
                 let val _ = printString (id^": I won the election")
-                in leader_node all_nodes id loops log term
+                in leader_node all_nodes id log term
                 end
             
             fun wait_for_votes (follower_votes, vote_amount) = 
-                let val _ = if vote_amount >= req_votes then won_election () else ()
-                in receive [
-                    hn ("YES-VOTE", follower_id) when not (contains follower_id follower_votes) => 
-                            wait_for_votes (acc_votes + 1)
-                    hn ("RequestVote", (p_id, other_log, other_term)) =>
-                        if other_term > term then
-                            let val _ = send(p_id, ("YES-VOTE", other_term))
-                            in await_election_end all_nodes id log other_term
+                let fun loop () = receive [
+                    hn ("YES-VOTE", follower_id) when (not (contains follower_id follower_votes)) => 
+                            wait_for_votes ((append follower_votes [follower_id]), vote_amount + 1),
+                    hn ("RequestVote", (c_term, other_c_id, c_log_index, c_log_term, p_id)) =>
+                        if c_term > term then
+                            let val _ = send(p_id, ("YES-VOTE", id))
+                            in await_election_end all_nodes id log c_term
                             end
-                        else wait_for_votes acc_votes,
-                    hn ("HEARTBEAT", x) => 
-                        let val _ = printString (id^": received heartbeat from leader, I must have lost election")
-                        in new_follower all_nodes id loops log term
+                        else wait_for_votes (follower_votes, vote_amount),
+                    hn ("AppendEntries", x) => 
+                        let val _ = printString (id^": received AppendEntries from leader, I must have lost election")
+                        in new_follower all_nodes id log term
                         end,
-                    hn ("VOTE-TIMEOUT") => new_candidate all_nodes id loops log term
+                    hn ("VOTE-TIMEOUT", nonce) => new_candidate all_nodes id log term
                 ]
+                in if vote_amount >= req_votes then won_election () else loop ()
                 end
-            val p_id = self()
-            val _ = start_timeout (fn () => send(p_id, "VOTE-TIMEOUT"))
-        in wait_for_votes 1 
+            val _ = start_timeout (fn () => send(p_id, ("VOTE-TIMEOUT")))
+        in wait_for_votes ([id], 1) 
         end
-    and new_candidate all_nodes id loops log term = candidate all_nodes id loops log (term + 1)
+    and new_candidate all_nodes id log term = candidate all_nodes id log (term + 1)
     
-    and follower all_nodes id loops startTimeout log term = 
+    and follower all_nodes id startTimeout log term = 
         let fun loop new_timeout = 
-            if new_timeout then follower all_nodes id (loops + 1) true log term
-            else follower all_nodes id loops false log term
+            if new_timeout then follower all_nodes id true log term
+            else follower all_nodes id false log term
+            val nonce = mkuuid()
             
             val _ = if startTimeout then 
                     let val p_id = self()
-                    in start_timeout (fn () => send(p_id, ("ELECTION-TIMEOUT", loops))) 
+                    in start_timeout (fn () => send(p_id, ("ELECTION-TIMEOUT", nonce))) 
                     end 
                 else ()
         in receive [
-            hn ("ADD_NODES", x) => follower (append all_nodes x) id (loops + 1) true log term,
-            hn ("HEARTBEAT", x) => 
-                let val _ = printString (id ^ ":received heartbeat from '"^x^"'")
-                in loop true
-                end,
-            hn ("ELECTION-TIMEOUT", x) when x = loops =>
+            hn ("ADD_NODES", x) => follower (append all_nodes x) id true log term,
+            hn ("ELECTION-TIMEOUT", x) when x = nonce =>
                 let val _ = printString (id^": START ELECTION")
-                in new_candidate all_nodes id loops log term
-                end
-            hn ("RequestVote", (p_id, c_log, c_term)) =>
+                in new_candidate all_nodes id log term
+                end,
+            hn ("RequestVote", (c_term, c_id, c_log_index, c_log_term, p_id)) =>
                 if c_term > term then
-                    let val _ = send(p_id, ("YES-VOTE", c_term))
-                    in await_election_end all_nodes id loops log c_term
+                    let val _ = send(p_id, ("YES-VOTE", id))
+                        val _ = print "Voting yes"
+                    in await_election_end all_nodes id log c_term c_id
                     end
                 else
-                    let val _ = send(p_id, "NO-VOTE")
+                    let val _ = send(c_id, "NO-VOTE")
                         val _ = printString (id^":voting no")
                     in loop true
                     end,
+            hn ("AppendEntries", heartbeat, l_id) when heartbeat = "heartbeat" => 
+                let val _ = printString (id ^ ": received AppendEntries from '"^l_id^"'")
+                in loop true
+                end,
+            hn ("AppendEntries", x) => 
+                let val _ = printString (id ^ ": received message '"^x^"'")
+                in loop true
+                end,
             hn ("debug-RequestVote") =>
-                leader_node all_nodes id log term,
-            hn x => 
-                let val _ = print x
-                in loop false
-                end]
+                leader_node all_nodes id log term]
         end
-    and new_follower all_nodes id loops log term = follower all_nodes id loops true log term
-    fun initiate_node all_nodes id = spawn (fn() => follower all_nodes id 0 true 0 1)
+    and new_follower all_nodes id log term = follower all_nodes id true log term
+    fun initiate_node all_nodes id = spawn (fn() => follower all_nodes id true 0 1)
     fun initiate_nodes n =
         let fun get_nodes n acc_id =
                 case n of
@@ -135,7 +154,9 @@ let
                         end
                 in loop nodes
                 end
-        in add_refs (get_nodes n "I")
+            val nodes = get_nodes n "I"
+            val _ = add_refs nodes
+        in nodes
         end
     fun initiate_3_test_nodes () =
         let val node1 = initiate_node [] "1"
@@ -146,5 +167,8 @@ let
             val _ = send(node1, ("ELECTION-TIMEOUT", 1))
         in send(node2, ("ELECTION-TIMEOUT", 1))
     end
-in initiate_nodes 3
+    val all_nodes = initiate_nodes 3
+    val _ = sleep 5000
+    val _ = send_to_all all_nodes ("SEND-MESSAGE", "Hello, World!") (self())
+in ()
 end
