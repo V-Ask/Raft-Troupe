@@ -68,7 +68,7 @@ let
         let val p_id = self()
             val nonce = mkuuid()
             val _ = printString (id^": I am now a candidate")
-            val _ = send_to_all all_nodes ("RequestVote", (term, id, 0, 0 (*two arguements left for logs*), p_id)) (self())
+            val _ = send_to_all all_nodes ("RequestVote", (term, id, 0, 0 (*two arguments left for logs*), p_id)) (self())
             val req_votes = ((length all_nodes) / 2 + 1)
             fun won_election () = 
                 let val _ = printString (id^": I won the election")
