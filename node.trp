@@ -1,4 +1,19 @@
 import lists
+
+(*
+    Log = {
+       log: Entry[],
+       lastApplied: int,
+       commitIndex: int,
+    }
+
+    Entry = {
+        term: int,
+        command: message
+    }
+*)
+
+
 let 
     fun contains element list = 
         case list of
@@ -20,6 +35,27 @@ let
                 if h = sender then send_to_all t msg sender
                 else send_and_loop h t
     end
+
+    fun create_empty_log () = {
+        log = [],
+        lastApplied = 0,
+        commitIndex = 0
+    }
+
+    fun append_message log message term = 
+        let val new_entry = {
+            term = term,
+            command = message
+        }
+        in {
+            log = new_entry :: log.log,
+            lastApplied = log.lastApplied,
+            commitIndex = log.commitIndex
+        } 
+    end
+
+
+
 
     fun start_timeout func = 
         let fun timeout () = 
@@ -56,7 +92,7 @@ let
             val nonce = mkuuid()
             val _ = printString (id^": I am now a candidate")
             val _ = send_to_all all_nodes ("RequestVote", (term, id, 0, 0 (*two arguments left for logs*), p_id)) (self())
-            val req_votes = ((length all_nodes) / 2 + 1)systemctl stasystemctl status rc-local.servicetus rc-local.service
+            val req_votes = ((length all_nodes) / 2 + 1)
             fun won_election () = 
                 let val _ = printString (id^": I won the election")
                 in leader_node all_nodes id log term
@@ -134,7 +170,10 @@ let
         let fun get_nodes n acc_id =
                 case n of
                 0 => []
-                | x => append (get_nodes (x - 1) (acc_id ^ "I")) [(initiate_node [] acc_id)]
+                | x => append 
+                    (get_nodes (x - 1) (acc_id ^ "I")) 
+                    [(initiate_node [] acc_id)]
+            
             fun add_refs nodes = 
                 let fun loop remaining = 
                     case remaining of

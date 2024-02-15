@@ -1,0 +1,21 @@
+let
+
+    fun create_empty_log () = {
+        log = [],
+        lastApplied = 0,
+        commitIndex = 0
+    }
+
+    fun append_message log message term = 
+        let val new_entry = {
+            term = term,
+            command = message
+        }
+        in {
+            log = new_entry :: log.log,
+            lastApplied = log.lastApplied,
+            commitIndex = log.commitIndex
+        } 
+    end
+in print (append_message (append_message (create_empty_log ()) "Hello There" 0) "General Kenoby" 1) 
+end
