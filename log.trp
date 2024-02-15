@@ -1,3 +1,6 @@
+import lists
+
+
 let
 
     fun create_empty_log () = {
@@ -26,5 +29,21 @@ let
        log with 
        commitIndex = log.commitIndex + 1
     }
-in print (append_message (append_message (create_empty_log ()) "Hello There" 0) "General Kenoby" 1) 
+
+    fun rollback_log log =
+        let val (_ :: prev_log) = log.log
+    in {
+        log with 
+        log = prev_log
+    }
+    end
+
+    fun get_log_index log = length log.log
+
+    fun get_latest_log_term log = 
+        case log.log of 
+        [] => 0
+        | h :: _ => h.term
+
+in print (get_latest_log_term (append_message (append_message (create_empty_log ()) "Hello There" 0) "General Kenoby" 1) )
 end
