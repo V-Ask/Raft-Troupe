@@ -26,8 +26,6 @@ let fun dic_manager () =
             if new_record = existing_record then dic
             else append [new_record] (remove existing_record dic)
         end
-    fun drop key dic = 
-        remove (get_record key dic) dic
     val dic = []
     fun loop dic = 
         let val dic = receive [
@@ -35,8 +33,7 @@ let fun dic_manager () =
             hn ("GET", key, sender_id) => 
                 let val _ = send(sender_id, ("RESPONSE", (get key dic)))
                 in dic
-                end,
-            hn ("DROP", key) => drop key dic
+                end
         ]
         in loop dic
         end
