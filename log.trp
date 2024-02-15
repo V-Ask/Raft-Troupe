@@ -12,10 +12,19 @@ let
             command = message
         }
         in {
-            log = new_entry :: log.log,
-            lastApplied = log.lastApplied,
-            commitIndex = log.commitIndex
+            log with 
+            log = new_entry :: log.log
         } 
     end
+
+    fun update_applied log = {
+        log with
+        lastApplied = log.lastApplied + 1
+    }
+    
+    fun update_commit log = {
+       log with 
+       commitIndex = log.commitIndex + 1
+    }
 in print (append_message (append_message (create_empty_log ()) "Hello There" 0) "General Kenoby" 1) 
 end
