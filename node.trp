@@ -85,7 +85,7 @@ let
                 in loop log term
             end
         in loop log term
-        end
+    end
 
     and candidate all_nodes id log term =
         let val p_id = self()
@@ -96,7 +96,7 @@ let
             fun won_election () = 
                 let val _ = printString (id^": I won the election")
                 in leader_node all_nodes id log term
-                end
+            end
             
             fun wait_for_votes (follower_votes, vote_amount) = 
                 let fun loop () = receive [
@@ -162,10 +162,12 @@ let
                 hn ("debug-RequestVote") =>
                     leader_node all_nodes id log term leader]
                 in loop all_nodes id log term voted_for
-                end
-        in loop all_nodes log term voted_for leader
         end
+        in loop all_nodes log term voted_for leader
+    end
+    
     fun initiate_node all_nodes id = spawn (fn() => follower all_nodes id 0 1 () ())
+    
     fun initiate_nodes n =
         let fun get_nodes n acc_id =
                 case n of
