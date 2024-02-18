@@ -6,41 +6,62 @@ let fun dic_manager () =
         | h :: t => 
             if h = element then t
             else append [h] (remove element t)
-    fun get_record key dic =
-        case dic of
-            [] => ()
-            | h :: t => 
-                if h.key = key then h
-                else get_record key t
-    fun get key dic = 
-        let val record = get_record key dic
-        in if record = () then ()
-            else record.value
-        end
-    fun set (key, value) dic = 
-        let val existing_record = get_record key dic 
-            val new_record = {key = key, value = value}
-        in if existing_record = () then 
-            append [{key = key, value = value}] dic
-        else 
-            if new_record = existing_record then dic
-            else append [new_record] (remove existing_record dic)
-        end
-    fun drop key dic = 
-        remove (get_record key dic) dic
-    val dic = []
-    fun loop dic = 
-        let val dic = receive [
-            hn ("SET", key, value) => set (key, value) dic,
-            hn ("GET", key, sender_id) => 
-                let val _ = send(sender_id, ("RESPONSE", (get key dic)))
-                in dic
-                end,
-            hn ("DROP", key) => drop key dic
-        ]
-        in loop dic
-        end
-    in loop dic
+        fun get_record key dic =
+            case dic of
+                [] => ()
+                | h :: t => 
+                    if h.key = key then h
+                    else get_record key t
+        fun get key dic = 
+            let val record = get_record key dic
+            in if record = () then ()
+                else record.committed_value
+            end
+
+        fun append_to_dic (key, value) dic =
+            let val existing_record = get_record key dic
+                val new_record = {key = key, appended_value = value, committed_value = ()}
+            in if existing_record = () then append [new_record] dic
+            else
+                if new_record = existing_record then dic
+                else append [{existing_record with appended_value = value}] (remove existing_record dic)
+            end
+
+        fun commit key dic = 
+            let val existing_record = get_record key dic
+            in if existing_record = () then
+                printString "ERROR: we are committing a record that does not exist"
+            else append[{existing_record with committed_value = existing_record.appended_value}] (remove existing_record dic)
+            end
+
+        fun set (key, value) dic = 
+            let val existing_record = get_record key dic
+                val new_record = {key = key, appended_value = (), committed_value = value}
+            in if existing_record = () then append [new_record] dic
+            else
+                if new_record = existing_record then dic
+                else append [new_record] (remove existing_record dic)
+            end
+
+        fun delete key dic = set key () dic
+
+        fun drop key dic = 
+            remove (get_record key dic) dic
+        fun loop dic = 
+            let val dic = receive [
+                hn ("APPEND", key, value) => append_to_dic (key, value) dic,
+                hn ("COMMIT", key) => commit key dic,
+                hn ("SET", key, value) => set (key, value) dic,
+                hn ("DELETE", key) => delete key dic,
+                hn ("GET", key, sender_id) => 
+                    let val _ = send(sender_id, ("RESPONSE", (get key dic)))
+                    in dic
+                    end,
+                hn ("DROP", key) => drop key dic
+            ]
+            in loop dic
+            end
+        in loop []
     end
     fun execute_and_receive func response_prefix =
     let val _ = func ()
@@ -55,11 +76,12 @@ let fun dic_manager () =
     in execute_and_receive func "RESPONSE"
     end
 
-    fun set_entry key value dic_pid = send(dic_pid, ("SET", key, value))
+    fun append_entry key value dic_pid = send(dic_pid, ("APPEND", key, value))
+    fun commit_entry key dic_pid = send(dic_pid, ("COMMIT", key))
 
     val dic_pid = spawn dic_manager
-    val _ = set_entry "hello, world" 1000 dic_pid
-    val _ = set_entry "hello, world" 42 dic_pid
+    val _ = append_entry "hello, world" 1000 dic_pid
+    val _ = commit_entry "hello, world" dic_pid
     val response = get_entry "hello, world" dic_pid 
 in print response
 end
