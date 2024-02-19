@@ -158,7 +158,7 @@ let
             end
             val _ = start_timeout (fn () => send(p_id, ("VOTE-TIMEOUT")))
         in wait_for_votes ([id], 1) 
-        end
+    end
     
     and follower all_nodes id log term voted_for leader = 
         let fun loop all_nodes log term voted_for leader = 
