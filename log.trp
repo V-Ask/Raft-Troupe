@@ -1,9 +1,23 @@
 import lists
 
+(*
+    Log = {
+       log: Entry[],
+       lastApplied: int,
+       commitIndex: int,
+    }
+
+    Entry = {
+        term: int,
+        command: message
+    }
+*)
 
 let
 
-    fun create_empty_log () = {
+   fun max a b = if a < b then b else a 
+
+    val empty_log = {
         log = [],
         lastApplied = 0,
         commitIndex = 0
@@ -25,9 +39,9 @@ let
         lastApplied = log.lastApplied + 1
     }
     
-    fun update_commit log = {
+    fun update_commit log new_index = {
        log with 
-       commitIndex = log.commitIndex + 1
+       commitIndex = (max new_index log.commitIndex)
     }
 
     fun rollback_log log =
@@ -45,5 +59,12 @@ let
         [] => 0
         | h :: _ => h.term
 
-in print (get_latest_log_term (append_message (append_message (create_empty_log ()) "Hello There" 0) "General Kenoby" 1) )
+    fun get_latest_log_command log = 
+        case log.log of
+        [] => 0 (* Should not be reachable*)
+        | h :: _ => h.command
+
+    fun get_nth_command log index = nth (reverse log.log) index 
+
+in print (get_nth_command (append_message (append_message (empty_log ) "Hello There" 1) "General Kenoby" 2) 1)
 end
