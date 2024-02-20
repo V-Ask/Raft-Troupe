@@ -28,7 +28,7 @@ let
         let fun send_and_loop h t =
             let val _ = send(h, msg)
             in send_to_all t msg sender
-            end
+        end
         in case processes of
             [] => ()
             | h :: t =>
@@ -94,6 +94,63 @@ let
 
     (* END OF LOG FUNCTIONS*)
 
+
+    (*
+        LeaderInfo = {
+            nextIndex = {
+                peer: p,
+                next: int
+            }[],
+            matchIndex = {
+                peer: p,
+                match: int
+            }[]
+        }
+    *)
+
+    (* LEADERINFO FUNCTIONS BEGIN*)
+
+    fun filter f l = case l of
+    [] => []
+    | h :: t => if f h then h :: (filter f t) else filter f t
+
+    fun first l = case l of
+    [] => []
+    | h :: _ => h
+
+
+    fun new_leader all_nodes = let 
+        val index = map (fn id => {peer = id, next = 0}) all_nodes
+        val match_index = map (fn id => {peer = id, match = 0}) all_nodes
+    in {
+        nextIndex = index,
+        matchIndex = match_index
+    } end
+    
+    fun get_next_index leader_info peer = first (filter (fn (x) => x.peer = peer) leader_info.nextIndex)
+
+    fun get_match_index leader_info peer = first (filter (fn (x) => x.peer = peer) leader_info.matchIndex)
+
+    fun update_next_index leader_info peer new = let
+        val prevIndex = get_next_index leader_info peer
+        val newIndex = {peer = peer, next = new}
+        val witoutPeer = filter (fn (x) => x.peer <> peer) leader_info.nextIndex
+    in {
+        leader_info with 
+        nextIndex = newIndex :: witoutPeer
+    } end
+
+    fun update_match_index leader_info peer new = let
+        val prevIndex = get_match_index leader_info peer
+        val newIndex = {peer = peer, next = new}
+        val witoutPeer = filter (fn (x) => x.peer <> peer) leader_info.matchIndex
+    in {
+        leader_info with 
+        matchIndex = newIndex :: witoutPeer
+    } end
+
+    (* LEADERINFO FUNCTIONS END*)
+
     fun start_timeout func = 
         let fun timeout () = 
             let val time = 1000 + ((random ()) * 100)
@@ -104,22 +161,27 @@ let
         in spawn timeout
     end
 
-    fun leader_node all_nodes id log term = 
+    fun leader_node all_nodes id log term leader_info = 
         let val p_id = self()
             fun heartbeat () = 
                 let val _ = send_to_all all_nodes ("AppendEntries", "heartbeat", id) (p_id)
+                    val _ = print "Sent heartbeat"
                     val _ = sleep 500
-                in heartbeat ()
+                in heartbeat () 
             end
             val _ = printString (id^": spawning heartbeat")
-            val _ = spawn heartbeat
+            val _ = spawn heartbeat 
             fun loop log term = 
                 let val _ = receive [
                     hn ("SEND-MESSAGE", x) =>
                         let val _ = print ("Sending message '"^x^"'...")
-                        in send_to_all all_nodes ("AppendEntries", x, id) (p_id)
-                        end]
-                in loop log term
+
+                        val log = append_message log x term
+                        val _ = send_to_all all_nodes ("AppendEntries", x, id) (p_id)
+                        in loop log term end,
+                    hn ("RESPONSE", (fol_term, fol_succ)) => 
+                    ]
+                in ()  (* Vi skal sørge for at genstarte løkken i receive ellers opdatere loggen ikke*)
             end
         in loop log term
     end
@@ -189,7 +251,7 @@ let
                         in loop all_nodes log term c_id leader
                         end,
                 hn ("AppendEntries", x, l_id) when l_id = leader => 
-                    let val _ = printString (id ^ ": received message '"^x^"'")
+                    let val _ = print (id ^ ": received message '"^x^"'")
                     in loop all_nodes log term () leader
                     end,
                 hn ("AppendEntries", x, l_id) when leader = () => 
@@ -203,7 +265,7 @@ let
         in loop all_nodes log term voted_for leader
     end
     
-    fun initiate_node all_nodes id = spawn (fn() => follower all_nodes id 0 1 () ())
+    fun initiate_node all_nodes id = spawn (fn() => follower all_nodes id empty_log 1 () ())
     
     fun initiate_nodes n =
         let fun get_nodes n acc_id =
@@ -237,7 +299,7 @@ let
             val _ = send(node1, ("ELECTION-TIMEOUT", 1))
         in send(node2, ("ELECTION-TIMEOUT", 1))
     end
-    val all_nodes = initiate_nodes 3
+    val all_nodes = initiate_nodes 5
     val _ = sleep 5000
     val _ = send_to_all all_nodes ("SEND-MESSAGE", "Hello, World!") (self())
 in ()
