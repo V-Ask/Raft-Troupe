@@ -24,8 +24,8 @@ let
     | h :: _ => h
 
 
-    fun new_leader all_nodes = let 
-        val index = map (fn id => {peer = id, next = 0}) all_nodes
+    fun new_leader all_nodes next_index = let 
+        val index = map (fn id => {peer = id, next = next_index}) all_nodes
         val match_index = map (fn id => {peer = id, match = 0}) all_nodes
     in {
         nextIndex = index,
