@@ -283,8 +283,8 @@ let
                     
                     val _ = 
                         if term > leader_term orelse prevLogIndex <> (get_log_index log) orelse prevLogTerm <> (get_latest_log_term log)
-                        then send (l_id, ("REJECT", (id, {term = term, leader = leader}, (get_log_index newlog + 1))))
-                        else send (l_id, ("ACKNOWLEGDE", (id, get_log_index newlog + 1)))
+                        then send (l_id, ("REJECT", (p_id, {term = term, leader = leader}, (get_log_index newlog + 1))))
+                        else send (l_id, ("ACKNOWLEGDE", (p_id, get_log_index newlog + 1)))
 
                     in loop all_nodes newlog term () leader
                     end,
