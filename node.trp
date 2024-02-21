@@ -197,7 +197,12 @@ let
                         let val leader_info = update_next_index leader_info peer new_index 
                         in if term >= terminfo.term 
                         then loop log term leader_info 
-                        else follower all_nodes id log terminfo.term () terminfo.leader end
+                        else follower all_nodes id log terminfo.term () terminfo.leader end,
+                    
+                    hn ("debug-printlog") =>
+                        let val _ = print log
+                        val _ = print leader_info
+                        in loop log term leader_info end
                 ] 
                 in ()  (* Vi skal sørge for at genstarte løkken i receive ellers opdatere loggen ikke*)
             end
@@ -271,7 +276,7 @@ let
                         end,
                 
                 hn ("AppendEntries", x, l_id, leader_term, prevLogIndex, prevLogTerm, leaderCommit) => 
-                    let val _ = print (id ^ ": received message '"^x^"'")
+                    let val _ = if x <> "heartbeat" then print (id ^ ": received message '"^x^"'") else ()
                     val leader = if leader <> () orelse term < leader_term then leader else l_id
                     val newlog = if leader_term >= term
                     then if prevLogIndex > (get_log_index log) 
@@ -289,8 +294,10 @@ let
                     in loop all_nodes newlog term () leader
                     end,
                 
-                hn ("debug-RequestVote") =>
-                    leader_node all_nodes id log term leader]
+                hn ("debug-printlog") =>
+                    let val _ = print log 
+                    in loop all_nodes log term () leader end
+                ]
                 in loop all_nodes id log term voted_for
         end
         in loop all_nodes log term voted_for leader
@@ -333,5 +340,9 @@ let
     val all_nodes = initiate_nodes 5
     val _ = sleep 5000
     val _ = send_to_all all_nodes ("SEND-MESSAGE", "Hello, World!") (self())
+    val _ = sleep 2000
+    val _ = send_to_all all_nodes ("SEND-MESSAGE", "Hello There") (self())
+    val _ = sleep 100
+    val _ = send_to_all all_nodes ("debug-printlog") (self())
 in ()
 end
