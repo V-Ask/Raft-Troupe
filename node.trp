@@ -221,12 +221,10 @@ let
                         wait_for_votes ((append follower_votes [follower_id]), vote_amount + 1),
                     hn ("NO-VOTE", other_term) when other_term > term =>
                         follower all_nodes id log term (),
-                    hn ("RequestVote", (c_term, other_c_id, c_log_index, c_log_term, p_id)) =>
-                        if c_term > term then
-                            let val _ = send(p_id, ("YES-VOTE", id))
-                            in follower all_nodes id log term
-                            end
-                        else wait_for_votes (follower_votes, vote_amount),
+                    hn ("RequestVote", (c_term, other_c_id, c_log_index, c_log_term, p_id)) when c_term > term =>
+                        let val _ = send(p_id, ("YES-VOTE", id))
+                        in follower all_nodes id log term other_c_id ()
+                        end,
                     
                     hn ("AppendEntries", x, id, term, prevLogIndex, leaderCommit) => 
                         let val _ = printString (id^": received AppendEntries from leader, I must have lost election")
@@ -249,7 +247,7 @@ let
                 hn ("ADD_NODES", x) => 
                     loop (append all_nodes x) log term voted_for leader,
                 
-                hn ("ELECTION-TIMEOUT", x) when x = nonce =>
+                hn ("ELECTION-TIMEOUT", nonce) =>
                     let val _ = printString (id^": START ELECTION")
                     in candidate all_nodes id log (term + 1) leader
                     end,
