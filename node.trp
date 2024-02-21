@@ -253,23 +253,23 @@ let
                     let val _ = printString (id^": START ELECTION")
                     in candidate all_nodes id log (term + 1) leader
                     end,
+
+                hn ("RequestVote", (c_term, c_id, c_log_index, c_log_term, p_id)) when c_id = voted_for =>
+                    let val _ = send(p_id, ("YES-VOTE", id))
+                        val _ = print "Voting yes"
+                        in loop all_nodes log c_term c_id leader
+                        end,
                 
-                hn ("RequestVote", (c_term, c_id, c_log_index, c_log_term, p_id)) when voted_for = () =>
+                hn ("RequestVote", (c_term, c_id, c_log_index, c_log_term, p_id)) =>
                     if c_term > term then
                         let val _ = send(p_id, ("YES-VOTE", id))
                             val _ = printString (id^": Voting yes")
-                        in loop all_nodes log term c_id leader
+                        in loop all_nodes log c_term c_id leader
                         end
                     else
                         let val _ = send(c_id, "NO-VOTE")
                             val _ = printString (id^":voting no")
                         in loop all_nodes log term () leader
-                        end,
-                
-                hn ("RequestVote", (c_term, c_id, c_log_index, c_log_term, p_id)) when c_id = voted_for =>
-                    let val _ = send(p_id, ("YES-VOTE", id))
-                        val _ = print "Voting yes"
-                        in loop all_nodes log term c_id leader
                         end,
                 
                 hn ("AppendEntries", x, l_id, leader_term, prevLogIndex, prevLogTerm, leaderCommit) => 
