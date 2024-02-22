@@ -153,7 +153,7 @@ let
 
     fun start_timeout func = 
         let fun timeout () = 
-            let val time = 1000 + ((random ()) * 100)
+            let val time = 1000 + ((random ()) * 1000)
                 val _ = sleep time
             in func ()
             end
@@ -213,7 +213,7 @@ let
         let val p_id = self()
             val nonce = mkuuid()
             val _ = printString (id^": I am now a candidate")
-            val _ = send_to_all all_nodes ("RequestVote", (term, id, 0, 0 (*two arguments left for logs*), p_id)) (self())
+            val _ = send_to_all all_nodes ("RequestVote", (term, id, 0, 0 (*two arguments left for logs*), p_id)) (p_id)
             val req_votes = ((length all_nodes) / 2 + 1)
             fun won_election () = 
                 let val _ = printString (id^": I won the election")
@@ -231,15 +231,15 @@ let
                         in follower all_nodes id log term other_c_id ()
                         end,
                     
-                    hn ("AppendEntries", x, id, term, prevLogIndex, leaderCommit) => 
+                    hn ("AppendEntries", x, l_id, term, prevLogIndex, leaderCommit) => 
                         let val _ = printString (id^": received AppendEntries from leader, I must have lost election")
-                        in follower all_nodes id log term () id
+                        in follower all_nodes id log term () l_id
                         end,
                     hn ("VOTE-TIMEOUT", x) when x = nonce => candidate all_nodes id log (term + 1)
                 ]
                 in if vote_amount >= req_votes then won_election () else loop ()
             end
-            val _ = start_timeout (fn () => send(p_id, ("VOTE-TIMEOUT")))
+            val _ = start_timeout (fn () => send(p_id, ("VOTE-TIMEOUT", nonce)))
         in wait_for_votes ([id], 1) 
     end
     
@@ -256,7 +256,6 @@ let
                     let val _ = printString (id^": START ELECTION")
                     in candidate all_nodes id log (term + 1) leader
                     end,
-
                 hn ("RequestVote", (c_term, c_id, c_log_index, c_log_term, p_id)) when c_id = voted_for =>
                     let val _ = send(p_id, ("YES-VOTE", id))
                         val _ = print "Voting yes"
@@ -270,7 +269,7 @@ let
                         in loop all_nodes log c_term c_id leader
                         end
                     else
-                        let val _ = send(c_id, "NO-VOTE")
+                        let val _ = send(p_id, "NO-VOTE")
                             val _ = printString (id^":voting no")
                         in loop all_nodes log term () leader
                         end,
@@ -349,5 +348,5 @@ let
         in ()
     end
     
-in test_local 5
+in initiate_3_distributed_nodes ()
 end
