@@ -235,7 +235,7 @@ let
                         let val _ = printString (id^": received AppendEntries from leader, I must have lost election")
                         in follower all_nodes id log term () id
                         end,
-                    hn ("VOTE-TIMEOUT", nonce) => candidate all_nodes id log (term + 1)
+                    hn ("VOTE-TIMEOUT", x) when x = nonce => candidate all_nodes id log (term + 1)
                 ]
                 in if vote_amount >= req_votes then won_election () else loop ()
             end
@@ -252,7 +252,7 @@ let
                 hn ("ADD_NODES", x) => 
                     loop (append all_nodes x) log term voted_for leader,
                 
-                hn ("ELECTION-TIMEOUT", nonce) =>
+                hn ("ELECTION-TIMEOUT", x) when x = nonce =>
                     let val _ = printString (id^": START ELECTION")
                     in candidate all_nodes id log (term + 1) leader
                     end,
