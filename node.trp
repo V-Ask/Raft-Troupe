@@ -303,7 +303,9 @@ let
         in loop all_nodes log term voted_for leader
     end
     
-    fun initiate_node all_nodes id = spawn (fn() => follower all_nodes id empty_log 1 () ())
+    fun default_node all_nodes id = fn() => follower all_nodes id empty_log 1 () ()
+    fun initiate_node all_nodes id = spawn (default_node all_nodes id)
+    fun initiate_distributed_node all_nodes id alias = spawn(alias, (default_node all_nodes id))
     
     fun initiate_nodes n =
         let fun get_nodes n acc_id =
@@ -328,21 +330,24 @@ let
         in nodes
     end
     
-    fun initiate_3_test_nodes () =
-        let val node1 = initiate_node [] "1"
-            val node2 = initiate_node [node1] "2"
-            val node3 = initiate_node [node1, node2] "3"
+    fun test_local n = 
+        let val all_nodes = initiate_nodes n
+            val _ = sleep 5000
+            val _ = send_to_all all_nodes ("SEND-MESSAGE", "Hello, World!") (self())
+            val _ = sleep 2000
+            val _ = send_to_all all_nodes ("SEND-MESSAGE", "Hello There") (self())
+            val _ = sleep 100
+        in send_to_all all_nodes ("debug-printlog") (self())
+    end
+
+    fun initiate_3_distributed_nodes () =
+        let val node1 = initiate_distributed_node [] "1" "@node1"
+            val node2 = initiate_distributed_node [node1] "2" "@node2"
+            val node3 = initiate_distributed_node [node2, node1] "3" "@node3"
             val _ = send(node1, ("ADD_NODES", [node2, node3]))
             val _ = send(node2, ("ADD_NODES", [node3]))
-            val _ = send(node1, ("ELECTION-TIMEOUT", 1))
-        in send(node2, ("ELECTION-TIMEOUT", 1))
+        in ()
     end
-    val all_nodes = initiate_nodes 5
-    val _ = sleep 5000
-    val _ = send_to_all all_nodes ("SEND-MESSAGE", "Hello, World!") (self())
-    val _ = sleep 2000
-    val _ = send_to_all all_nodes ("SEND-MESSAGE", "Hello There") (self())
-    val _ = sleep 100
-    val _ = send_to_all all_nodes ("debug-printlog") (self())
-in ()
+    
+in test_local 5
 end
