@@ -161,7 +161,7 @@ let
         in spawn timeout
     end
 
-    fun leader_node all_nodes id log term leader_info = 
+    fun leader_node all_nodes id log term leader_info state_machine = 
         let val p_id = self()
             fun heartbeat () = 
                 let val _ = send (p_id, "SEND_HEARTBEAT")
@@ -197,7 +197,7 @@ let
                         let val leader_info = update_next_index leader_info peer new_index 
                         in if term >= terminfo.term 
                         then loop log term leader_info 
-                        else follower all_nodes id log terminfo.term () terminfo.leader end,
+                        else follower all_nodes id log terminfo.term () terminfo.leader state_machine end,
                     
                     hn ("debug-printlog") =>
                         let val _ = print log
@@ -209,7 +209,7 @@ let
         in loop log term leader_info
     end
 
-    and candidate all_nodes id log term =
+    and candidate all_nodes id log term state_machine =
         let val p_id = self()
             val nonce = mkuuid()
             val _ = printString (id^": I am now a candidate")
@@ -217,7 +217,7 @@ let
             val req_votes = ((length all_nodes) / 2 + 1)
             fun won_election () = 
                 let val _ = printString (id^": I won the election")
-                in leader_node all_nodes id log term (new_leader all_nodes)
+                in leader_node all_nodes id log term (new_leader all_nodes) state_machine
             end
             
             fun wait_for_votes (follower_votes, vote_amount) = 
@@ -225,17 +225,17 @@ let
                     hn ("YES-VOTE", follower_id) when (not (contains follower_id follower_votes)) => 
                         wait_for_votes ((append follower_votes [follower_id]), vote_amount + 1),
                     hn ("NO-VOTE", other_term) when other_term > term =>
-                        follower all_nodes id log term (),
+                        follower all_nodes id log term () state_machine,
                     hn ("RequestVote", (c_term, other_c_id, c_log_index, c_log_term, p_id)) when c_term > term =>
                         let val _ = send(p_id, ("YES-VOTE", id))
-                        in follower all_nodes id log term other_c_id ()
+                        in follower all_nodes id log term other_c_id () state_machine
                         end,
                     
                     hn ("AppendEntries", x, l_id, term, prevLogIndex, leaderCommit) => 
                         let val _ = printString (id^": received AppendEntries from leader, I must have lost election")
-                        in follower all_nodes id log term () l_id
+                        in follower all_nodes id log term () l_id state_machine
                         end,
-                    hn ("VOTE-TIMEOUT", x) when x = nonce => candidate all_nodes id log (term + 1)
+                    hn ("VOTE-TIMEOUT", x) when x = nonce => candidate all_nodes id log (term + 1) state_machine
                 ]
                 in if vote_amount >= req_votes then won_election () else loop ()
             end
@@ -243,7 +243,7 @@ let
         in wait_for_votes ([id], 1) 
     end
     
-    and follower all_nodes id log term voted_for leader = 
+    and follower all_nodes id log term voted_for leader state_machine = 
         let fun loop all_nodes log term voted_for leader = 
             let val nonce = mkuuid()
                 val p_id = self()
@@ -254,7 +254,7 @@ let
                 
                 hn ("ELECTION-TIMEOUT", x) when x = nonce =>
                     let val _ = printString (id^": START ELECTION")
-                    in candidate all_nodes id log (term + 1) leader
+                    in candidate all_nodes id log (term + 1) leader state_machine
                     end,
                 hn ("RequestVote", (c_term, c_id, c_log_index, c_log_term, p_id)) when c_id = voted_for =>
                     let val _ = send(p_id, ("YES-VOTE", id))
@@ -292,7 +292,6 @@ let
 
                     in loop all_nodes newlog term () leader
                     end,
-                
                 hn ("debug-printlog") =>
                     let val _ = print log 
                     in loop all_nodes log term () leader end
@@ -302,17 +301,25 @@ let
         in loop all_nodes log term voted_for leader
     end
     
-    fun default_node all_nodes id = fn() => follower all_nodes id empty_log 1 () ()
-    fun initiate_node all_nodes id = spawn (default_node all_nodes id)
-    fun initiate_distributed_node all_nodes id alias = spawn(alias, (default_node all_nodes id))
+    fun default_node all_nodes id state_machine_pid = 
+        fn() => follower all_nodes id empty_log 1 () () state_machine_pid
+        
+    fun initiate_node all_nodes id state_machine = 
+        let val state_machine_pid = spawn state_machine 
+        in spawn (default_node all_nodes id state_machine_pid)
+    end
+    fun initiate_distributed_node all_nodes id alias state_machine = 
+        let val state_machine_pid = spawn(alias, state_machine)
+        in spawn(alias, (default_node all_nodes id state_machine_pid))
+    end
     
-    fun initiate_nodes n =
+    fun initiate_nodes n state_machine =
         let fun get_nodes n acc_id =
                 case n of
                 0 => []
                 | x => append 
                     (get_nodes (x - 1) (acc_id ^ "I")) 
-                    [(initiate_node [] acc_id)]
+                    [(initiate_node [] acc_id state_machine)]
             
             fun add_refs nodes = 
                 let fun loop remaining = 
@@ -328,9 +335,18 @@ let
             val _ = add_refs nodes
         in nodes
     end
+
+    fun ping () =
+        let val _ = printString "Hello, World!"
+            fun loop () = receive [
+                hn ("Ping") => printString "Pong!"
+            ]
+        in loop ()
+    end
     
     fun test_local n = 
-        let val all_nodes = initiate_nodes n
+        let 
+            val all_nodes = initiate_nodes n ping
             val _ = sleep 5000
             val _ = send_to_all all_nodes ("SEND-MESSAGE", "Hello, World!") (self())
             val _ = sleep 2000
@@ -348,5 +364,5 @@ let
         in ()
     end
     
-in initiate_3_distributed_nodes ()
+in test_local 5
 end
