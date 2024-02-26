@@ -43,6 +43,8 @@ let
 
    fun max a b = if a < b then b else a 
 
+   fun min a b = if a > b then b else a
+
     val empty_log = {
         log = [],
         lastApplied = 0,
@@ -302,7 +304,7 @@ let
                             then rollback_log log 
                             else if x = "heartbeat" then log else append_message log x leader_term
                     else log
-                    val newlog = update_commit newlog leaderCommit
+                    val newlog = update_commit newlog (min leaderCommit (get_log_index newlog)) 
                     val _ = 
                         if term > leader_term orelse prevLogIndex <> (get_log_index log) orelse prevLogTerm <> (get_latest_log_term log)
                         then send (l_id, ("REJECT", (p_id, {term = term, leader = leader}, (get_log_index newlog + 1))))
