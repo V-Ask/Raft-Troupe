@@ -142,7 +142,7 @@ let
 
     fun update_match_index leader_info peer new = let
         val prevIndex = get_match_index leader_info peer
-        val newIndex = {peer = peer, next = new}
+        val newIndex = {peer = peer, match = new}
         val witoutPeer = filter (fn (x) => x.peer <> peer) leader_info.matchIndex
     in {
         leader_info with 
@@ -297,7 +297,7 @@ let
                     val _ = 
                         if term > leader_term orelse prevLogIndex <> (get_log_index log) orelse prevLogTerm <> (get_latest_log_term log)
                         then send (l_id, ("REJECT", (p_id, {term = term, leader = leader}, (get_log_index newlog + 1))))
-                        else send (l_id, ("ACKNOWLEGDE", (p_id, get_log_index newlog + 1)))
+                        else send (l_id, ("ACKNOWLEGDE", (p_id, get_log_index newlog)))
 
                     in loop all_nodes newlog term () leader
                     end,
