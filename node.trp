@@ -149,6 +149,15 @@ let
         matchIndex = newIndex :: witoutPeer
     } end
 
+
+    fun get_matches leader_info = map (fn x => x.match) leader_info.matchIndex
+
+
+    fun get_newcommit matches = foldl (fn (x, acc) => 
+        case (filter (fn y => y.value = x) acc) of 
+        [] => {value=x,amount=1} :: acc 
+        | h :: _ => {h with amount = (h.amount + 1)} :: (filter (fn y => y.value <> x) acc)) [] matches
+
     (* LEADERINFO FUNCTIONS END*)
 
     fun start_timeout func = 
