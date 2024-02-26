@@ -38,7 +38,7 @@ let
 
 
     (*
-        LOG FUNCTIONS
+        LOG FUNCTIONS BEGIN
     *)
 
    fun max a b = if a < b then b else a 
@@ -92,7 +92,7 @@ let
 
     fun get_nth_command log index = nth (reverse log.log) index 
 
-    (* END OF LOG FUNCTIONS*)
+    (* LOG FUNCTIONS END *)
 
 
     (*
@@ -153,10 +153,18 @@ let
     fun get_matches leader_info = map (fn x => x.match) leader_info.matchIndex
 
 
-    fun get_newcommit matches = foldl (fn (x, acc) => 
+    fun get_newcommit matches acc = foldl (fn (x, acc) => 
         case (filter (fn y => y.value = x) acc) of 
         [] => {value=x,amount=1} :: acc 
-        | h :: _ => {h with amount = (h.amount + 1)} :: (filter (fn y => y.value <> x) acc)) [] matches
+        | h :: _ => {h with amount = (h.amount + 1)} :: (filter (fn y => y.value <> x) acc)) acc matches
+
+    fun calc_highest_commit_helper matches acc = case matches of 
+        [] => acc
+        | _ => calc_highest_commit_helper (filter (fn x => x > 0) (map (fn x => x - 1) matches)) ((get_newcommit matches acc))
+
+    fun calc_highest_commit matches = foldl 
+        (fn (x, acc) => if x.value > acc.value then x else acc) {value=-1} 
+        (filter (fn x => x.amount >= (length matches) / 2) (calc_highest_commit_helper matches []))
 
     (* LEADERINFO FUNCTIONS END*)
 
@@ -181,7 +189,8 @@ let
             val _ = printString (id^": spawning heartbeat")
             val _ = spawn heartbeat 
             fun loop log term leader_info = 
-                let val _ = receive [
+                let val log = update_commit log (calc_highest_commit (map (fn x => x.match) leader_info.matchIndex)).value
+                val _ = receive [
                     hn ("SEND_HEARTBEAT") =>
                         let val _ = print ("Sending heartbeat")
                         val prevLogIndex = get_log_index log
@@ -293,7 +302,7 @@ let
                             then rollback_log log 
                             else if x = "heartbeat" then log else append_message log x leader_term
                     else log
-                    
+                    val newlog = update_commit newlog leaderCommit
                     val _ = 
                         if term > leader_term orelse prevLogIndex <> (get_log_index log) orelse prevLogTerm <> (get_latest_log_term log)
                         then send (l_id, ("REJECT", (p_id, {term = term, leader = leader}, (get_log_index newlog + 1))))
@@ -355,7 +364,7 @@ let
     
     fun test_local n = 
         let 
-            val all_nodes = initiate_nodes n ping
+            val all_nodes = initiate_nodes n (fn () => 0)
             val _ = sleep 5000
             val _ = send_to_all all_nodes ("SEND-MESSAGE", "Hello, World!") (self())
             val _ = sleep 2000
