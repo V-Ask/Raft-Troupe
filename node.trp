@@ -94,6 +94,13 @@ let
 
     fun get_nth_command log index = nth (reverse log.log) index 
 
+    fun apply_log log f = if log.lastApplied < log.commitIndex 
+        then 
+            let val _ = f ((get_nth_command log (log.lastApplied + 1)).command) 
+            val log = update_applied log
+            in apply_log log f end
+        else log
+
     (* LOG FUNCTIONS END *)
 
 
@@ -192,6 +199,7 @@ let
             val _ = spawn heartbeat 
             fun loop log term leader_info = 
                 let val log = update_commit log (calc_highest_commit (map (fn x => x.match) leader_info.matchIndex)).value
+                val log = apply_log log print
                 val _ = receive [
                     hn ("SEND_HEARTBEAT") =>
                         let val _ = print ("Sending heartbeat")
@@ -205,6 +213,8 @@ let
                         val prevLogIndex = get_log_index log
                         val prevLogTerm = get_latest_log_term log
                         val log = append_message log x term
+                        val leader_info = update_match_index leader_info p_id (get_log_index log)
+                        val leader_info = update_next_index leader_info p_id ((get_log_index log) + 1)
                         val _ = send_to_all all_nodes ("AppendEntries", x, p_id, term, prevLogIndex, prevLogTerm, log.commitIndex) (p_id)
                         in loop log term leader_info end,
                 
@@ -267,6 +277,7 @@ let
         let fun loop all_nodes log term voted_for leader = 
             let val nonce = mkuuid()
                 val p_id = self()
+                val log = apply_log log print
                 val _ = start_timeout (fn () => send(p_id, ("ELECTION-TIMEOUT", nonce)))
                 val _ = receive [
                 hn ("ADD_NODES", x) => 
@@ -371,7 +382,7 @@ let
             val _ = send_to_all all_nodes ("SEND-MESSAGE", "Hello, World!") (self())
             val _ = sleep 2000
             val _ = send_to_all all_nodes ("SEND-MESSAGE", "Hello There") (self())
-            val _ = sleep 100
+            val _ = sleep 500
         in send_to_all all_nodes ("debug-printlog") (self())
     end
 

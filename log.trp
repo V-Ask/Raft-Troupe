@@ -66,5 +66,13 @@ let
 
     fun get_nth_command log index = nth (reverse log.log) index 
 
+    fun apply_log log f = if log.lastApplied < log.commitIndex 
+        then 
+            let val _ = f (get_nth_command (log.lastApplied + 1)).command 
+            val log = update_applied log
+            in apply_log log f end
+        else f
+
+
 in print (get_nth_command (append_message (append_message (empty_log ) "Hello There" 1) "General Kenoby" 2) 1)
 end
