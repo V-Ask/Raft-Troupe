@@ -295,6 +295,12 @@ let
                         let val _ = print log
                         val _ = print leader_info
                         in loop log term leader_info end,
+                    hn ("debug-pause") =>
+                        let fun loop () = receive [
+                            hn ("debug-continue") => (),
+                            hn x => loop ()
+                        ]
+                        in loop () end,
                     hn _ => loop log term leader_info
                 ] 
                 in ()  (* Vi skal sørge for at genstarte løkken i receive ellers opdatere loggen ikke*)
@@ -317,8 +323,10 @@ let
                 let fun loop () = receive [
                     hn ("YES-VOTE", follower_id) when (not (contains follower_id follower_votes)) => 
                         wait_for_votes ((append follower_votes [follower_id]), vote_amount + 1),
+
                     hn ("NO-VOTE", other_term) when other_term > term =>
                         follower all_nodes id log term () state_machine,
+
                     hn ("RequestVote", (c_term, other_c_id, c_log_index, c_log_term, p_id)) when c_term > term =>
                         let val _ = send(p_id, ("YES-VOTE", id))
                         in follower all_nodes id log term other_c_id () state_machine
@@ -328,7 +336,13 @@ let
                         let val _ = printString (id^": received AppendEntries from leader, I must have lost election")
                         in follower all_nodes id log term () l_id state_machine
                         end,
-                    hn ("VOTE-TIMEOUT", x) when x = nonce => candidate all_nodes id log (term + 1) state_machine
+                    hn ("VOTE-TIMEOUT", x) when x = nonce => candidate all_nodes id log (term + 1) state_machine,
+                    hn ("debug-pause") =>
+                        let fun loop () = receive [
+                            hn ("debug-continue") => (),
+                            hn x => loop ()
+                        ]
+                        in loop () end
                 ]
                 in if vote_amount >= req_votes then won_election () else loop ()
             end
@@ -387,8 +401,7 @@ let
                     end,
                 hn ("debug-printlog") =>
                     let val _ = print log 
-                    in loop all_nodes log term () leader end,
-                hn _ => loop all_nodes log term () leader
+                    in loop all_nodes log term () leader end
                 ]
                 in loop all_nodes id log term voted_for
         end
