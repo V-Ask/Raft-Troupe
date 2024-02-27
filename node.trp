@@ -334,7 +334,7 @@ let
     
     fun default_node all_nodes id state_machine_pid = 
         fn() => follower all_nodes id empty_log 1 () () state_machine_pid
-        
+
     fun initiate_node all_nodes id state_machine = 
         let val state_machine_pid = spawn state_machine 
         in spawn (default_node all_nodes id state_machine_pid)
