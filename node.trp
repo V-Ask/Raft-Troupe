@@ -199,7 +199,7 @@ let
             val _ = spawn heartbeat 
             fun loop log term leader_info = 
                 let val log = update_commit log (calc_highest_commit (map (fn x => x.match) leader_info.matchIndex)).value
-                val log = apply_log log print
+                val log = apply_log log (fn x => send (state_machine, x))
                 val _ = receive [
                     hn ("SEND_HEARTBEAT") =>
                         let val _ = print ("Sending heartbeat")
@@ -370,14 +370,14 @@ let
     fun ping () =
         let val _ = printString "Hello, World!"
             fun loop () = receive [
-                hn ("Ping") => printString "Pong!"
+                hn x => print x
             ]
         in loop ()
     end
     
     fun test_local n = 
         let 
-            val all_nodes = initiate_nodes n (fn () => 0)
+            val all_nodes = initiate_nodes n ping
             val _ = sleep 5000
             val _ = send_to_all all_nodes ("SEND-MESSAGE", "Hello, World!") (self())
             val _ = sleep 2000
