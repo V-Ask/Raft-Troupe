@@ -277,7 +277,7 @@ let
         let fun loop all_nodes log term voted_for leader = 
             let val nonce = mkuuid()
                 val p_id = self()
-                val log = apply_log log print
+                val log = apply_log log (fn x => send (state_machine, x))
                 val _ = start_timeout (fn () => send(p_id, ("ELECTION-TIMEOUT", nonce)))
                 val _ = receive [
                 hn ("ADD_NODES", x) => 
@@ -285,7 +285,7 @@ let
                 
                 hn ("ELECTION-TIMEOUT", x) when x = nonce =>
                     let val _ = printString (id^": START ELECTION")
-                    in candidate all_nodes id log (term + 1) leader state_machine
+                    in candidate all_nodes id log (term + 1) state_machine
                     end,
                 hn ("RequestVote", (c_term, c_id, c_log_index, c_log_term, p_id)) when c_id = voted_for =>
                     let val _ = send(p_id, ("YES-VOTE", id))
