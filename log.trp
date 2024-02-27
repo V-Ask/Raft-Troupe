@@ -1,0 +1,78 @@
+import lists
+
+(*
+    Log = {
+       log: Entry[],
+       lastApplied: int,
+       commitIndex: int,
+    }
+
+    Entry = {
+        term: int,
+        command: message
+    }
+*)
+
+let
+
+   fun max a b = if a < b then b else a 
+
+    val empty_log = {
+        log = [],
+        lastApplied = 0,
+        commitIndex = 0
+    }
+
+    fun append_message log message term = 
+        let val new_entry = {
+            term = term,
+            command = message
+        }
+        in {
+            log with 
+            log = new_entry :: log.log
+        } 
+    end
+
+    fun update_applied log = {
+        log with
+        lastApplied = log.lastApplied + 1
+    }
+    
+    fun update_commit log new_index = {
+       log with 
+       commitIndex = (max new_index log.commitIndex)
+    }
+
+    fun rollback_log log =
+        let val (_ :: prev_log) = log.log
+    in {
+        log with 
+        log = prev_log
+    }
+    end
+
+    fun get_log_index log = length log.log
+
+    fun get_latest_log_term log = 
+        case log.log of 
+        [] => 0
+        | h :: _ => h.term
+
+    fun get_latest_log_command log = 
+        case log.log of
+        [] => 0 (* Should not be reachable*)
+        | h :: _ => h.command
+
+    fun get_nth_command log index = nth (reverse log.log) index 
+
+    fun apply_log log f = if log.lastApplied < log.commitIndex 
+        then 
+            let val _ = f (get_nth_command (log.lastApplied + 1)).command 
+            val log = update_applied log
+            in apply_log log f end
+        else f
+
+
+in print (get_nth_command (append_message (append_message (empty_log ) "Hello There" 1) "General Kenoby" 2) 1)
+end
