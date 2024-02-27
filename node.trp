@@ -79,7 +79,7 @@ let
     }
     end
 
-    fun get_log_index log = length log.log
+    fun get_log_index log = length log.log - 1
 
     fun get_latest_log_term log = 
         case log.log of 
@@ -232,15 +232,17 @@ let
             fun append_entries log leader_info node =
                 let val logIndex = get_log_index log
                     val nextIndex = get_next_index leader_info node
-                    val prevLogIndex = get_log_index log
                     val prevLogTerm = get_latest_log_term log
                 in if logIndex >= nextIndex.next then 
                     let 
+                        val _ = print "Nextindex should be higher"
+                        val _ = print logIndex
+                        val _ = print nextIndex.next
                         val entry = get_nth_command log nextIndex.next
                         val prevEntryTerm = if nextIndex.next > 1 then (get_nth_command log (nextIndex.next - 1)).term else 0
                     in send(node, ("AppendEntries", entry.command, p_id, term, nextIndex.next - 1, prevEntryTerm, log.commitIndex))
                 end
-                else send (node, ("AppendEntries", "heartbeat", p_id, term, prevLogIndex, prevLogTerm, log.commitIndex))
+                else send (node, ("AppendEntries", "heartbeat", p_id, term, logIndex, prevLogTerm, log.commitIndex))
             end
             fun heartbeat () = 
                 let val _ = send (p_id, "SEND_HEARTBEAT")
@@ -252,6 +254,11 @@ let
                     ]
             end
             val heartbeat_pid = spawn heartbeat 
+            val prevLogIndex = get_log_index log
+            val prevLogTerm = get_latest_log_term log
+            val _ = print prevLogIndex
+            val _ = print prevLogTerm
+            val _ = print log
             fun loop log term leader_info = 
                 let val log = update_commit log (calc_highest_commit (map (fn x => x.match) leader_info.matchIndex)).value
                 val log = apply_log log (fn x => send (state_machine, x))
@@ -416,6 +423,10 @@ let
                         if term > leader_term orelse prevLogIndex <> logIndex orelse (prevLogTerm <> latestLogTerm andalso latestLogTerm > 0)
                         then 
                             let val _ = printString (id^": I REJECT")
+                                val _ = print prevLogIndex
+                                val _ = print logIndex
+                                val _ = print prevLogTerm
+                                val _ = print latestLogTerm
                             in send (l_id, ("REJECT", (p_id, {term = term, leader = leader}, (get_log_index newlog + 1)))) end
                         else send (l_id, ("ACKNOWLEGDE", (p_id, get_log_index newlog)))
 
@@ -431,8 +442,8 @@ let
                         hn x => loop ()
                     ]
                     in loop () end,
-                hn ("debug-timeout") => start_election ()
-
+                hn ("debug-timeout") => start_election (),
+                hn _ => ()
             ]
             in loop all_nodes log term log term voted_for leader
         end
@@ -495,16 +506,13 @@ let
             val _ = sleep 2000
             val _ = send_to_all all_nodes ("RAFT-SET", ("Victor", "Gruppemedlem 1")) (self())
             val _ = sleep 2000
-            val _ = send_to_nth all_nodes "debug-pause" 1
             val _ = send_to_nth all_nodes "debug-timeout" 2
-            val _ = printString "I gets killed"
             val _ = sleep 500
+            val _ = printString "Set again"
             val _ = send_to_all all_nodes ("RAFT-SET", ("Victor", "Gruppemedlem 2")) (self())
             val _ = sleep 2000
-            val _ = send_to_nth all_nodes "debug-continue" 1
-            val _ = printString "I gets revived"
-            val _ = sleep 2000
             val _ = send_to_all all_nodes ("debug-printlog") (self())
+            val _ = sleep 2000
         in receive [hn x => print x]
     end
 
