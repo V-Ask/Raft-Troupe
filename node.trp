@@ -369,9 +369,13 @@ let
 
     fun ping () =
         let val _ = printString "Hello, World!"
-            fun loop () = receive [
-                hn x => print x
-            ]
+            fun loop () = 
+                let val _ = receive [
+                    hn ("PING") => printString "PONG",
+                    hn x => printString "Unrecognized message..."
+                ]
+                in loop()
+            end
         in loop ()
     end
     
@@ -379,7 +383,7 @@ let
         let 
             val all_nodes = initiate_nodes n ping
             val _ = sleep 5000
-            val _ = send_to_all all_nodes ("SEND-MESSAGE", "Hello, World!") (self())
+            val _ = send_to_all all_nodes ("SEND-MESSAGE", "PING") (self())
             val _ = sleep 2000
             val _ = send_to_all all_nodes ("SEND-MESSAGE", "Hello There") (self())
             val _ = sleep 500

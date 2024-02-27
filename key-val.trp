@@ -31,8 +31,8 @@ let fun dic_manager () =
     val dic = []
     fun loop dic = 
         let val dic = receive [
-            hn ("SET", key, value) => set (key, value) dic,
-            hn ("GET", key, sender_id) => 
+            hn ("SET", (key, value)) => set (key, value) dic,
+            hn ("GET", (key, sender_id)) => 
                 let val _ = send(sender_id, ("RESPONSE", (get key dic)))
                 in dic
                 end,
