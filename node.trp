@@ -271,7 +271,7 @@ let
                 val log = apply_log log (fn x => send (state_machine, x))
                 val _ = receive [
                     hn ("SEND_HEARTBEAT", x) when nonce = x =>
-                        let val _ = print ("Sending heartbeat")
+                        let val _ = printString (id^": Sending heartbeat")
                         in leader_node all_nodes id log term leader_info state_machine end,
                     
 (*                     hn ("SEND-MESSAGE", x) =>
@@ -290,7 +290,7 @@ let
                             val log = append_message log ("SET",x) term
                             val leader_info = update_match_index leader_info p_id (get_log_index log)
                             val leader_info = update_next_index leader_info p_id ((get_log_index log) + 1)
-                            val _ = print "Appending new message to log"
+                            val _ = printString (id^": Appending new message to log")
                         in leader_node all_nodes id log term leader_info state_machine end,
 
                     hn ("RAFT-GET", x) =>
@@ -313,7 +313,7 @@ let
                         in follower all_nodes id log term other_c_id () state_machine
                         end,
                     
-                    hn ("AppendEntries", x, l_id, term, prevIndex, prevTerm, commitIndex) => 
+                    hn ("AppendEntries", x, l_id, other_term, prevIndex, prevTerm, commitIndex) when other_term > term => 
                         let val _ = printString (id^": received AppendEntries from leader, I must have lost position")
                         in follower all_nodes id log term () l_id state_machine
                         end,
@@ -340,7 +340,9 @@ let
         let val p_id = self()
             val nonce = mkuuid()
             val _ = printString (id^": I am now a candidate")
-            val _ = send_to_all all_nodes ("RequestVote", (term, id, 0, 0 (*two arguments left for logs*), p_id)) (p_id)
+            val prevLogIndex = get_log_index log
+            val prevLogTerm = get_latest_log_term log
+            val _ = send_to_all all_nodes ("RequestVote", (term, id, prevLogIndex, prevLogTerm, p_id)) (p_id)
             val req_votes = ((length all_nodes) / 2 + 1)
             fun won_election () = 
                 let val _ = printString (id^": I won the election")
@@ -399,17 +401,24 @@ let
                         end,
                 
                 hn ("RequestVote", (c_term, c_id, c_log_index, c_log_term, p_id)) =>
-                    if c_term > term then
-                        let val _ = send(p_id, ("YES-VOTE", id))
-                            val _ = printString (id^": Voting yes")
-                        in follower all_nodes id log c_term c_id leader state_machine
+                    let val latestLogIndex = get_log_index log
+                        val latestLogTerm = get_latest_log_term log
+                        fun no_vote () =
+                            let val _ = send(p_id, "NO-VOTE")
+                                val _ = printString (id^":voting no")
+                            in follower all_nodes id log term voted_for leader state_machine
                         end
-                    else
-                        let val _ = send(p_id, "NO-VOTE")
-                            val _ = printString (id^":voting no")
-                        in follower all_nodes id log term voted_for leader state_machine
-                        end,
-                
+                        fun yes_vote () =
+                            let val _ = send(p_id, ("YES-VOTE", id))
+                                val _ = printString (id^": Voting yes")
+                            in follower all_nodes id log c_term c_id leader state_machine
+                        end
+                    in 
+                        if latestLogIndex > c_log_index then no_vote ()
+                        else if latestLogTerm > c_log_term then no_vote ()
+                        else if c_term <= term then no_vote ()
+                        else yes_vote ()
+                    end,
                 hn ("AppendEntries", x, l_id, leader_term, prevLogIndex, prevLogTerm, leaderCommit) => 
                     let val leader = if leader <> () orelse term < leader_term then leader else l_id
                         val accepting = 
@@ -505,7 +514,6 @@ let
             val _ = sleep 2000
             val _ = print "killing I"
             val _ = send_to_nth all_nodes ("debug-pause") 1
-            val _ = sleep 2000
             val _ = sleep 2000
             val _ = send_to_all all_nodes ("RAFT-SET", ("Victor", "Gruppemedlem 2")) (self())
             val _ = sleep 2000
