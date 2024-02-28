@@ -362,10 +362,11 @@ let
                         in follower all_nodes id log term other_c_id () state_machine
                         end,
                     
-                    hn ("AppendEntries", x, l_id, term, prevLogIndex, leaderCommit) => 
-                        let val _ = printString (id^": received AppendEntries from leader, I must have lost election")
+                    hn ("AppendEntries", x, l_id, other_term, prevIndex, prevTerm, commitIndex) when other_term >= term => 
+                        let val _ = printString (id^": received AppendEntries from leader, I must have lost position")
                         in follower all_nodes id log term () l_id state_machine
                         end,
+
                     hn ("VOTE-TIMEOUT", x) when x = nonce => candidate all_nodes id log (term + 1) state_machine,
                     hn ("debug-pause") =>
                         let fun loop () = receive [
@@ -523,14 +524,31 @@ let
         in receive [hn x => print x]
     end
 
+    fun test2_local n = 
+        let 
+            val all_nodes = initiate_nodes n key_val_store
+            val _ = send_to_nth all_nodes ("debug-timeout") 1
+            val _ = send_to_nth all_nodes ("debug-timeout") 2
+            val _ = sleep 10000
+        in receive [hn x => print x]
+    end
+
     fun initiate_3_distributed_nodes () =
-        let val node1 = initiate_distributed_node [] "1" "@node1"
-            val node2 = initiate_distributed_node [node1] "2" "@node2"
-            val node3 = initiate_distributed_node [node2, node1] "3" "@node3"
+        let 
+            val node1 = initiate_distributed_node [] "1" "@node1" key_val_store
+            val node2 = initiate_distributed_node [node1] "2" "@node2" key_val_store
+            val node3 = initiate_distributed_node [node2, node1] "3" "@node3" key_val_store
+            val all_nodes = [node1, node2, node3]
             val _ = send(node1, ("ADD_NODES", [node2, node3]))
             val _ = send(node2, ("ADD_NODES", [node3]))
-        in ()
+            val _ = sleep 2000
+            val _ = send_to_all all_nodes ("RAFT-SET", ("Victor", "Gruppemedlem 1")) (self())
+            val _ = sleep 2000
+            val _ = send_to_all all_nodes ("RAFT-SET", ("Victor", "Gruppemedlem 2")) (self())
+            val _ = sleep 2000
+            val _ = send_to_all all_nodes ("debug-printlog") (self())
+        in receive [hn x => print x]
     end
     
-in test_local 5
+in test2_local 5
 end
