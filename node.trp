@@ -77,7 +77,8 @@ let
     }
 
     fun rollback_log log =
-        let val (_ :: prev_log) = log.log
+        let val _ = print log
+            val (_ :: prev_log) = log.log
     in {
         log with 
         log = prev_log
@@ -87,7 +88,7 @@ let
     fun rollback_log_to log n = 
         if n < (length log.log) then
             let val log = rollback_log log
-            in (rollback_log_to log (n - 1))
+            in (rollback_log_to log n)
         end
         else log
 
@@ -302,9 +303,9 @@ let
                             val leader_info = update_next_index leader_info peer (logIndex + 1)
                         in (loop log term leader_info) end,
                     
-                    hn ("REJECT", (peer, terminfo, new_index)) => 
+                    hn ("REJECT", (peer, terminfo, logIndex)) => 
                         if term >= terminfo.term then 
-                            let val leader_info = update_next_index leader_info peer new_index 
+                            let val leader_info = update_next_index leader_info peer (logIndex + 1) 
                             in loop log term leader_info 
                             end
                         else follower all_nodes id log terminfo.term () terminfo.leader state_machine,
@@ -397,7 +398,7 @@ let
                 hn ("ELECTION-TIMEOUT", x) when x = nonce => start_election (),
                 hn ("RequestVote", (c_term, c_id, c_log_index, c_log_term, p_id)) when c_id = voted_for =>
                     let val _ = send(p_id, ("YES-VOTE", id))
-                        val _ = print "Voting yes"
+                        val _ = printString (id^": Voting yes")
                         in follower all_nodes id log c_term c_id leader state_machine
                         end,
                 
@@ -434,11 +435,14 @@ let
                                 in update_commit log (min leaderCommit (get_log_index log)) 
                                 end
                             else log
-                        val reject = fn () => send (l_id, ("REJECT", (p_id, {term = term, leader = leader}, (get_log_index newlog + 1))))
+                        val reject = fn () => send (l_id, ("REJECT", (p_id, {term = term, leader = leader}, (get_log_index newlog))))
                         val ack = fn () => send (l_id, ("ACKNOWLEGDE", (p_id, get_log_index newlog)))
                         val term = if term < leader_term then leader_term else term
                         val _ = if accepting then ack ()
-                                else reject ()
+                                else 
+                                    let val _ = print "REJECTING"
+                                    in reject ()
+                                    end
                     in follower all_nodes id newlog term voted_for leader state_machine
                     end,
                 hn ("debug-printlog") =>
@@ -511,14 +515,16 @@ let
             val all_nodes = initiate_nodes n key_val_store
             val _ = send_to_nth all_nodes ("debug-timeout") 1
             val _ = sleep 2000
-            val _ = send_to_all all_nodes ("RAFT-SET", ("Victor", "Gruppemedlem 1")) (self())
+            val _ = send_to_all all_nodes ("RAFT-SET", ("Hello", "There")) (self())
             val _ = sleep 2000
             val _ = print "killing I"
             val _ = send_to_nth all_nodes ("debug-pause") 1
             val _ = sleep 2000
-            val _ = send_to_all all_nodes ("RAFT-SET", ("Victor", "Gruppemedlem 2")) (self())
+            val _ = send_to_all all_nodes ("RAFT-SET", ("Hello", "World")) (self())
             val _ = sleep 2000
+            val _ = print "reviving I"
             val _ = send_to_nth all_nodes ("debug-continue") 1
+            val _ = send_to_nth all_nodes ("RAFT-SET", ("Hello", "Other World")) 1
             val _ = sleep 2000
             val _ = send_to_all all_nodes ("debug-printlog") (self())
         in receive [hn x => print x]
@@ -550,5 +556,5 @@ let
         in receive [hn x => print x]
     end
     
-in test2_local 5
+in test_local 5
 end
