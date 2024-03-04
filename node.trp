@@ -1,4 +1,5 @@
 import lists
+import quickselect
 
 (*
     Log = {
@@ -14,24 +15,7 @@ import lists
 *)
 
 
-let 
-    fun contains element list = 
-        case list of
-        [] => false
-        | h :: t =>
-            if h = element then true
-            else contains element t
-
-    fun not a = a = false
-
-    fun filter f l = case l of
-    [] => []
-    | h :: t => if f h then h :: (filter f t) else filter f t
-
-    fun first l = case l of
-    [] => []
-    | h :: _ => h
-
+let fun not a = a = false
     fun send_to_all processes msg sender = map (fn x => send(x, msg)) (filter (fn x => x <> sender) processes)
 
     fun send_to_nth processes msg n = send((nth (reverse processes) n), msg)
@@ -174,19 +158,7 @@ let
 
     fun get_matches leader_info = map (fn x => x.match) leader_info.matchIndex
 
-
-    fun get_newcommit matches acc = foldl (fn (x, acc) => 
-        case (filter (fn y => y.value = x) acc) of 
-        [] => {value=x,amount=1} :: acc 
-        | h :: _ => {h with amount = (h.amount + 1)} :: (filter (fn y => y.value <> x) acc)) acc matches
-
-    fun calc_highest_commit_helper matches acc = case matches of 
-        [] => acc
-        | _ => calc_highest_commit_helper (filter (fn x => x > 0) (map (fn x => x - 1) matches)) ((get_newcommit matches acc))
-
-    fun calc_highest_commit matches = foldl 
-        (fn (x, acc) => if x.value > acc.value then x else acc) {value=-1} 
-        (filter (fn x => x.amount >= (length matches) / 2) (calc_highest_commit_helper matches []))
+    fun calc_highest_commit matches = median matches
 
     (* LEADERINFO FUNCTIONS END*)
 
@@ -249,10 +221,19 @@ let
     end
 
     fun start_random_timeout func = start_timeout func (1000 + ((random ()) * 1000))
+
+    (*
+        StateMachine = {
+            set_hook: string,
+            get_hook: string,
+            snapshot_con: fn a, b => ... return true they should be merged, false otherwise
+        }
+    
+    *)
     
     fun leader_node all_nodes id log term leader_info state_machine = 
         let val p_id = self()
-            fun append_entries log leader_info node =
+            fun append_entries node =
                 let val nextIndex = get_next_index leader_info node
                     val logIndex = get_log_index log
                 in if logIndex + 1 >= nextIndex.next then 
@@ -264,38 +245,28 @@ let
                 end
                 else print "ERROR"
             end
-            val _ = map (fn x => append_entries log leader_info x) (filter (fn x => x <> p_id) all_nodes)
+            val _ = map (fn x => append_entries x) (filter (fn x => x <> p_id) all_nodes)
             val nonce = mkuuid ()
             val _ = start_timeout (fn () => send (p_id, ("SEND_HEARTBEAT", nonce))) 500
             fun loop log term leader_info = 
-                let val log = update_commit log (calc_highest_commit (map (fn x => x.match) leader_info.matchIndex)).value
-                val log = apply_log log (fn x => send (state_machine, x))
+                let val log = update_commit log (calc_highest_commit (map (fn x => x.match) leader_info.matchIndex))
+                val log = apply_log log (fn x => send (state_machine.pid, x))
                 val _ = receive [
                     hn ("SEND_HEARTBEAT", x) when nonce = x =>
                         let val _ = printString (id^": Sending heartbeat")
                         in leader_node all_nodes id log term leader_info state_machine end,
                     
-(*                     hn ("SEND-MESSAGE", x) =>
-                        let val _ = print ("Sending message '"^x^"'...")
-                        val prevLogIndex = get_log_index log
-                        val prevLogTerm = get_latest_log_term log
-                        val log = append_message log x term
-                        val leader_info = update_match_index leader_info p_id (get_log_index log)
-                        val leader_info = update_next_index leader_info p_id ((get_log_index log) + 1)
-                        val _ = send_to_all all_nodes ("AppendEntries", x, p_id, term, prevLogIndex, prevLogTerm, log.commitIndex) (p_id)
-                        in loop log term leader_info end, *)
-                
-                    hn ("RAFT-SET", x) => 
+                    hn ("RAFT-UPDATE", x) => 
                         let val prevLogIndex = get_log_index log
                             val prevLogTerm = get_latest_log_term log
-                            val log = append_message log ("SET",x) term
+                            val log = append_message log (state_machine.sethook x) term
                             val leader_info = update_match_index leader_info p_id (get_log_index log)
                             val leader_info = update_next_index leader_info p_id ((get_log_index log) + 1)
                             val _ = printString (id^": Appending new message to log")
                         in leader_node all_nodes id log term leader_info state_machine end,
 
                     hn ("RAFT-GET", x) =>
-                        let val _ = send (state_machine, ("GET", x))
+                        let val _ = send (state_machine.pid, (state_machine.gethook x))
                         in loop log term leader_info end,
 
                     hn ("ACKNOWLEGDE", (peer, logIndex)) => (*Dette er hvis append er en success*)
@@ -387,7 +358,7 @@ let
             val nonce = mkuuid()
             val _ = start_random_timeout (fn () => send(p_id, ("ELECTION-TIMEOUT", nonce)))
             fun loop all_nodes log term voted_for leader = 
-                let val log = apply_log log (fn x => send (state_machine, x))
+                let val log = apply_log log (fn x => send (state_machine.pid, x))
                 fun start_election () =
                     let val _ = printString (id^": START ELECTION")
                     in candidate all_nodes id log (term + 1) state_machine
@@ -466,22 +437,23 @@ let
     fun default_node all_nodes id state_machine_pid = 
         fn() => follower all_nodes id empty_log 1 () () state_machine_pid
 
-    fun initiate_node all_nodes id state_machine = 
+    fun initiate_node all_nodes id state_machine sethook gethook = 
         let val state_machine_pid = spawn state_machine 
-        in spawn (default_node all_nodes id state_machine_pid)
+            val state_machine_record = {pid = state_machine_pid, sethook = sethook, gethook = gethook}
+        in spawn (default_node all_nodes id state_machine_record)
     end
     fun initiate_distributed_node all_nodes id alias state_machine = 
         let val state_machine_pid = spawn(alias, state_machine)
         in spawn(alias, (default_node all_nodes id state_machine_pid))
     end
     
-    fun initiate_nodes n state_machine =
+    fun initiate_nodes n state_machine sethook gethook =
         let fun get_nodes n acc_id =
                 case n of
                 0 => []
                 | x => append 
                     (get_nodes (x - 1) (acc_id ^ "I")) 
-                    [(initiate_node [] acc_id state_machine)]
+                    [(initiate_node [] acc_id state_machine sethook gethook)]
             
             fun add_refs nodes = 
                 let fun loop remaining = 
@@ -509,22 +481,24 @@ let
             end
         in loop ()
     end
-    
+
     fun test_local n = 
         let 
-            val all_nodes = initiate_nodes n key_val_store
+            val all_nodes = initiate_nodes n key_val_store 
+                (fn x => case x of (key, value) => ("SET", (key, value))) 
+                (fn (x, callback_pid) => ("GET", (x, callback_pid)))
             val _ = send_to_nth all_nodes ("debug-timeout") 1
             val _ = sleep 2000
-            val _ = send_to_all all_nodes ("RAFT-SET", ("Hello", "There")) (self())
+            val _ = send_to_all all_nodes ("RAFT-UPDATE", ("Hello", "There")) (self())
             val _ = sleep 2000
             val _ = print "killing I"
             val _ = send_to_nth all_nodes ("debug-pause") 1
             val _ = sleep 2000
-            val _ = send_to_all all_nodes ("RAFT-SET", ("Hello", "World")) (self())
+            val _ = send_to_all all_nodes ("RAFT-UPDATE", ("Hello", "World")) (self())
             val _ = sleep 2000
             val _ = print "reviving I"
             val _ = send_to_nth all_nodes ("debug-continue") 1
-            val _ = send_to_nth all_nodes ("RAFT-SET", ("Hello", "Other World")) 1
+            val _ = send_to_nth all_nodes ("RAFT-UPDATE", ("Hello", "Other World")) 1
             val _ = sleep 2000
             val _ = send_to_all all_nodes ("debug-printlog") (self())
         in receive [hn x => print x]
@@ -548,13 +522,15 @@ let
             val _ = send(node1, ("ADD_NODES", [node2, node3]))
             val _ = send(node2, ("ADD_NODES", [node3]))
             val _ = sleep 2000
-            val _ = send_to_all all_nodes ("RAFT-SET", ("Victor", "Gruppemedlem 1")) (self())
+            val _ = send_to_all all_nodes ("RAFT-UPDATE", ("Victor", "Gruppemedlem 1")) (self())
             val _ = sleep 2000
-            val _ = send_to_all all_nodes ("RAFT-SET", ("Victor", "Gruppemedlem 2")) (self())
+            val _ = send_to_all all_nodes ("RAFT-UPDATE", ("Victor", "Gruppemedlem 2")) (self())
             val _ = sleep 2000
             val _ = send_to_all all_nodes ("debug-printlog") (self())
         in receive [hn x => print x]
     end
-    
+
+    fun raft state_machine_func set_hook get_hook =
+        initiate_nodes 5 state_machine_func set_hook get_hook
 in test_local 5
 end
