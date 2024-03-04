@@ -264,9 +264,11 @@ let
                 end
                 else print "ERROR"
             end
+
             val _ = map (fn x => append_entries log leader_info x) (filter (fn x => x <> p_id) all_nodes)
             val nonce = mkuuid ()
             val _ = start_timeout (fn () => send (p_id, ("SEND_HEARTBEAT", nonce))) 500
+
             fun loop log term leader_info = 
                 let val log = update_commit log (calc_highest_commit (map (fn x => x.match) leader_info.matchIndex)).value
                 val log = apply_log log (fn x => send (state_machine, x))
@@ -374,7 +376,7 @@ let
                             hn ("debug-continue") => (),
                             hn x => loop ()
                         ]
-                        in loop () end
+                    in loop () end
                 ]
                 in if vote_amount >= req_votes then won_election () else loop ()
             end
@@ -435,9 +437,12 @@ let
                                 in update_commit log (min leaderCommit (get_log_index log)) 
                                 end
                             else log
+
                         val reject = fn () => send (l_id, ("REJECT", (p_id, {term = term, leader = leader}, (get_log_index newlog))))
                         val ack = fn () => send (l_id, ("ACKNOWLEGDE", (p_id, get_log_index newlog)))
+
                         val term = if term < leader_term then leader_term else term
+
                         val _ = if accepting then ack ()
                                 else 
                                     let val _ = print "REJECTING"
