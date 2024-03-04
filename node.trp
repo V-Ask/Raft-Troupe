@@ -277,16 +277,6 @@ let
                         let val _ = printString (id^": Sending heartbeat")
                         in leader_node all_nodes id log term leader_info state_machine end,
                     
-(*                     hn ("SEND-MESSAGE", x) =>
-                        let val _ = print ("Sending message '"^x^"'...")
-                        val prevLogIndex = get_log_index log
-                        val prevLogTerm = get_latest_log_term log
-                        val log = append_message log x term
-                        val leader_info = update_match_index leader_info p_id (get_log_index log)
-                        val leader_info = update_next_index leader_info p_id ((get_log_index log) + 1)
-                        val _ = send_to_all all_nodes ("AppendEntries", x, p_id, term, prevLogIndex, prevLogTerm, log.commitIndex) (p_id)
-                        in loop log term leader_info end, *)
-                
                     hn ("RAFT-SET", x) => 
                         let val prevLogIndex = get_log_index log
                             val prevLogTerm = get_latest_log_term log
