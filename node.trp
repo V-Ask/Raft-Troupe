@@ -33,11 +33,13 @@ let fun not a = a = false
 
     fun min a b = if a > b then b else a
 
-    val empty_snapshot = {
-        log = [],
-        lastIncludedIndex = 0,
-        lastIncludedTerm = 0
+    fun take_snapshot log index term = {
+        log = log,
+        lastIncludedIndex = index,
+        lastIncludedTerm = term
     }
+
+    val empty_snapshot = take_snapshot [] 0 0
 
     val empty_log = {
         log = [],
@@ -88,21 +90,21 @@ let fun not a = a = false
     }
     end
 
+    fun get_log_index log = (length log.log) + log.snapshot.lastIncludedIndex
+
     fun rollback_log_to log n = 
-        if n < (length log.log) then
+        if n < (get_log_index log) then
             let val log = rollback_log log
             in (rollback_log_to log n)
         end
         else log
 
-    fun get_log_index log = length log.log
-
-    fun get_latest_entry_term entries =
-        case entries of
-        [] => 0
+    fun get_latest_entry_term log =
+        case log.log of
+        [] => log.snapshot.lastIncludedTerm
         | h :: _ => h.term
 
-    fun get_latest_log_term log = get_latest_entry_term log.log
+    fun get_latest_log_term log = get_latest_entry_term log
 
     fun get_latest_log_command log = 
         case log.log of
@@ -127,7 +129,7 @@ let fun not a = a = false
         else log
 
     fun get_snapshot snapshot_con log = 
-        let val committed_log = slice ((get_log_index log) - log.commitIndex) log.commitIndex log.log
+        let val committed_entries = slice ((get_log_index log) - log.commitIndex) log.commitIndex log.log
             fun merge entry other_entries = 
                 case other_entries of
                 [] => [entry]
@@ -138,7 +140,15 @@ let fun not a = a = false
             fun merge_all log = case log of 
                 [] => []
                 | h :: t => merge h (merge_all t)
-        in ((reverse (merge_all committed_log)), log.commitIndex, (get_latest_entry_term committed_log))
+        in ((reverse (merge_all committed_entries)), log.commitIndex, (first committed_entries).term)
+    end
+
+    fun apply_snapshot snapshot_con log =
+        let val (merged_and_committed, commit_index, commit_term) = get_snapshot snapshot_con log
+            val snapshot = take_snapshot merged_and_committed commit_index commit_term
+            val uncommitted_entries = slice (get_log_index log) log.commitIndex log.log
+            val log = {log with log = uncommitted_entries}
+        in { log with snapshot = snapshot }
     end
     (* LOG FUNCTIONS END *)
 
@@ -343,6 +353,9 @@ let fun not a = a = false
                     hn ("debug-snapshot") => 
                         let val ss = get_snapshot state_machine.snapshot_cond log
                             val _ = print ss 
+                        in loop log term leader_info end,
+                    hn ("debug-applysnapshot") =>
+                        let val _ = print (apply_snapshot state_machine.snapshot_cond log)
                         in loop log term leader_info end,
                     hn _ => loop log term leader_info
                 ] 
@@ -581,7 +594,7 @@ let fun not a = a = false
             val _ = send_to_all all_nodes ("RAFT-UPDATE", ("All at", "once")) (self())
             val _ = sleep 2000
             val _ = send_to_all all_nodes ("RAFT-UPDATE", ("Hello", "There")) (self())
-            val _ = send_to_all all_nodes ("debug-snapshot") (self())
+            val _ = send_to_all all_nodes ("debug-applysnapshot") (self())
             val _ = sleep 2000
             val _ = send_to_all all_nodes ("debug-snapshot") (self())
         in receive [hn x => print x]
@@ -607,5 +620,5 @@ let fun not a = a = false
 
     fun raft state_machine_func set_hook get_hook =
         initiate_nodes 5 state_machine_func set_hook get_hook
-in test_snapshot 5
+in test_snapshot 3
 end
