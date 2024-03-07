@@ -9,7 +9,7 @@ import quickselect
         commitIndex: int,
     }
     Snapshot = {
-        log: Entry[],
+        snapshot: Some state
         lastIncludedIndex: int,
         lastIncludedTerm: int
     }
@@ -33,13 +33,20 @@ let fun not a = a = false
 
     fun min a b = if a > b then b else a
 
-    fun take_snapshot log index term = {
-        log = log,
+    fun set_snapshot snapshot index term =
+    {
+        snapshot = snapshot,
         lastIncludedIndex = index,
         lastIncludedTerm = term
     }
 
-    val empty_snapshot = take_snapshot [] 0 0
+    fun take_snapshot state_machine index term = 
+        let val _ = send (state_machine.pid, state_machine.snapshothook)
+            val state = receive[hn x => x]
+        in set_snapshot state index term
+    end
+
+    val empty_snapshot = set_snapshot () 0 0
 
     val empty_log = {
         log = [],
@@ -127,26 +134,11 @@ let fun not a = a = false
             val log = update_applied log
             in apply_log log f end
         else log
-
-    fun get_snapshot snapshot_con log = 
-        let val committed_entries = slice ((get_log_index log) - log.commitIndex) log.commitIndex log.log
-            fun merge entry other_entries = 
-                case other_entries of
-                [] => [entry]
-                | h :: t => (
-                    if (snapshot_con (entry.command, h.command)) then merge entry t
-                    else if (snapshot_con (h.command, entry.command)) then merge h t
-                    else h :: merge entry t)
-            fun merge_all log = case log of 
-                [] => []
-                | h :: t => merge h (merge_all t)
-        in ((reverse (merge_all committed_entries)), log.commitIndex, (first committed_entries).term)
-    end
-
-    fun apply_snapshot snapshot_con log =
-        let val (merged_and_committed, commit_index, commit_term) = get_snapshot snapshot_con log
-            val snapshot = take_snapshot merged_and_committed commit_index commit_term
+    
+    fun apply_snapshot state_machine log =
+        let val lastCommitted = get_nth_command log log.commitIndex
             val uncommitted_entries = slice (get_log_index log) log.commitIndex log.log
+            val snapshot = take_snapshot state_machine log.commitIndex lastCommitted.term
             val log = {log with log = uncommitted_entries}
         in { log with snapshot = snapshot }
     end
@@ -167,7 +159,6 @@ let fun not a = a = false
     *)
 
     (* LEADERINFO FUNCTIONS BEGIN*)
-
 
     fun new_leader all_nodes log = 
         let val nextIndex = get_log_index log
@@ -271,7 +262,7 @@ let fun not a = a = false
         StateMachine = {
             set_hook: string,
             get_hook: string,
-            snapshot_cond: fn a, b => ... return true they should be merged, false otherwise
+            snapshothook: fn a, b => ... return true they should be merged, false otherwise
         }
     
     *)
@@ -350,12 +341,8 @@ let fun not a = a = false
                             hn x => pause ()
                         ]
                         in pause () end,
-                    hn ("debug-snapshot") => 
-                        let val ss = get_snapshot state_machine.snapshot_cond log
-                            val _ = print ss 
-                        in loop log term leader_info end,
                     hn ("debug-applysnapshot") =>
-                        let val _ = print (apply_snapshot state_machine.snapshot_cond log)
+                        let val _ = print (apply_snapshot state_machine.snapshothook log)
                         in loop log term leader_info end,
                     hn _ => loop log term leader_info
                 ] 
@@ -371,7 +358,7 @@ let fun not a = a = false
             val prevLogIndex = get_log_index log
             val prevLogTerm = get_latest_log_term log
             val _ = send_to_all all_nodes ("RequestVote", (term, id, prevLogIndex, prevLogTerm, p_id)) (p_id)
-            val req_votes = ((length all_nodes) / 2 + 1)
+            val req_votes = ((length all_nodes) / 2)
             fun won_election () = 
                 let val _ = printString (id^": I won the election")
                 in leader_node all_nodes id log term (new_leader all_nodes log) state_machine
@@ -495,10 +482,14 @@ let fun not a = a = false
     fun default_node all_nodes id state_machine_pid = 
         fn() => follower all_nodes id empty_log 1 () () state_machine_pid
 
-    fun initiate_node all_nodes id state_machine sethook gethook snapshot_cond = 
+    fun initiate_node all_nodes id state_machine sethook gethook snapshot_gethook snapshot_sethook = 
         let val state_machine_pid = spawn state_machine 
             val state_machine_record = 
-                {pid = state_machine_pid, sethook = sethook, gethook = gethook, snapshot_cond = snapshot_cond}
+                {pid = state_machine_pid, 
+                sethook = sethook, 
+                gethook = gethook, 
+                snapshot_gethook = snapshot_gethook,
+                snapshot_sethook = snapshot_sethook}
         in spawn (default_node all_nodes id state_machine_record)
     end
     fun initiate_distributed_node all_nodes id alias state_machine = 
@@ -506,13 +497,13 @@ let fun not a = a = false
         in spawn(alias, (default_node all_nodes id state_machine_pid))
     end
     
-    fun initiate_nodes n state_machine sethook gethook snapshot_cond =
+    fun initiate_nodes n state_machine sethook gethook snapshot_gethook snapshot_sethook =
         let fun get_nodes n acc_id =
                 case n of
                 0 => []
                 | x => append 
                     (get_nodes (x - 1) (acc_id ^ "I")) 
-                    [(initiate_node [] acc_id state_machine sethook gethook snapshot_cond)]
+                    [(initiate_node [] acc_id state_machine sethook gethook snapshot_gethook snapshot_sethook)]
             
             fun add_refs nodes = 
                 let fun loop remaining = 
@@ -545,14 +536,8 @@ let fun not a = a = false
         initiate_nodes n key_val_store 
                     (fn x => case x of (key, value) => ("SET", (key, value))) 
                     (fn (x, callback_pid) => ("GET", (x, callback_pid)))
-                    (fn (latest, earlier) => 
-                        case latest of
-                        ("SET", (key, _)) => 
-                            (case earlier of 
-                            ("SET", (other_key, _)) => key = other_key
-                            | _ => false)
-                        | _ => false
-                    )
+                    (fn (callback_pid) => ("GET_SNAPSHOT", callback_pid))
+                    (fn x => ("SET_SNAPSHOT", x))
 
     fun test_local n = 
         let 
@@ -620,5 +605,6 @@ let fun not a = a = false
 
     fun raft state_machine_func set_hook get_hook =
         initiate_nodes 5 state_machine_func set_hook get_hook
-in test_snapshot 3
+        
+in test_local 3
 end

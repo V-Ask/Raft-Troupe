@@ -36,6 +36,8 @@ let fun dic_manager () =
                 let val _ = send(sender_id, ("RESPONSE", (get key dic)))
                 in dic
                 end,
+            hn ("SNAPSHOT", sender_id) => send(sender_id, dic)
+            hn ("SET_STATE", other_dic) => loop other_dic
             hn ("DROP", key) => drop key dic
         ]
         in loop dic
