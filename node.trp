@@ -41,8 +41,9 @@ let fun not a = a = false
     }
 
     fun take_snapshot state_machine index term = 
-        let val _ = send (state_machine.pid, state_machine.snapshothook)
-            val state = receive[hn x => x]
+        let val pid = self()
+            val _ = send (state_machine.pid, (state_machine.snapshot_gethook pid))
+            val state = receive[hn ("SNAPSHOT", x) => x]
         in set_snapshot state index term
     end
 
@@ -237,12 +238,16 @@ let fun not a = a = false
                     let val _ = send(sender_id, ("RESPONSE", (get key dic)))
                     in dic
                     end,
+                hn ("GET_SNAPSHOT", sender_id) => 
+                    let val _ = send(sender_id, ("SNAPSHOT", dic))
+                    in dic
+                    end,
+                hn ("SET_SNAPSHOT", other_dic) => loop other_dic,
                 hn ("DROP", key) => drop key dic
             ]
             in loop dic
             end
-
-        in loop dic 
+        in loop dic
     end
     (* KEY VALUE FUNCTIONS END*)
 
@@ -282,8 +287,6 @@ let fun not a = a = false
                 end
                 else print "ERROR"
             end
-
-
 
             val _ = map (fn x => append_entries x) (filter (fn x => x <> p_id) all_nodes)
             val nonce = mkuuid ()
@@ -342,7 +345,8 @@ let fun not a = a = false
                         ]
                         in pause () end,
                     hn ("debug-applysnapshot") =>
-                        let val _ = print (apply_snapshot state_machine.snapshothook log)
+                        let val _ = print state_machine
+                            val _ = print (apply_snapshot state_machine log)
                         in loop log term leader_info end,
                     hn _ => loop log term leader_info
                 ] 
@@ -581,7 +585,7 @@ let fun not a = a = false
             val _ = send_to_all all_nodes ("RAFT-UPDATE", ("Hello", "There")) (self())
             val _ = send_to_all all_nodes ("debug-applysnapshot") (self())
             val _ = sleep 2000
-            val _ = send_to_all all_nodes ("debug-snapshot") (self())
+            val _ = send_to_all all_nodes ("debug-applysnapshot") (self())
         in receive [hn x => print x]
     end
 
@@ -606,5 +610,5 @@ let fun not a = a = false
     fun raft state_machine_func set_hook get_hook =
         initiate_nodes 5 state_machine_func set_hook get_hook
         
-in test_local 3
+in test_snapshot 3
 end
