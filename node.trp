@@ -283,17 +283,20 @@ let fun not a = a = false
         let val p_id = self()
 
             fun append_entries node =
-                let val nextIndex = get_next_index leader_info node
+                    let val nextIndex = get_next_index leader_info node
                     val logIndex = get_log_index log
                 in if logIndex + 1 >= nextIndex.next then 
                     let 
-                        val prevLogIndex = nextIndex.next - 1
-                        val prevEntryTerm = if prevLogIndex > 0 then (get_nth_command log prevLogIndex).term else 0
+                        val latestLogIndex = nextIndex.next - 1
                     in 
-                        if prevLogIndex < log.snapshot.lastIncludedIndex then send(node, ("Snapshot", log.snapshot, p_id, term))
+                        if latestLogIndex < log.snapshot.lastIncludedIndex then send(node, ("Snapshot", log.snapshot, p_id, term))
                         else 
-                            let val entries = get_commands_after_nth (reverse log.log) prevLogIndex
-                            in send(node, ("AppendEntries", entries, p_id, term, prevLogIndex, prevEntryTerm, log.commitIndex))
+                            let val entries = get_commands_after_nth (reverse log.log) latestLogIndex
+                                val afterSnapshot = latestLogIndex - log.snapshot.lastIncludedIndex
+                                val prevEntryTerm = 
+                                    if afterSnapshot > 0 then (get_nth_command log afterSnapshot).term 
+                                    else log.snapshot.lastIncludedTerm
+                            in send(node, ("AppendEntries", entries, p_id, term, latestLogIndex, prevEntryTerm, log.commitIndex))
                         end
                 end
                 else print "ERROR"
@@ -311,7 +314,7 @@ let fun not a = a = false
                         in leader_node all_nodes id log term leader_info state_machine end,
                     
                     hn ("RAFT-UPDATE", x) => 
-                        let val prevLogIndex = get_log_index log
+                        let val latestLogIndex = get_log_index log
                             val prevLogTerm = get_latest_log_term log
                             val log = append_message log (state_machine.sethook x) term
                             val leader_info = update_match_index leader_info p_id (get_log_index log)
@@ -358,7 +361,8 @@ let fun not a = a = false
                     hn ("debug-applysnapshot") =>
                         let val snapshot = get_snapshot state_machine log
                             val newlog = apply_snapshot state_machine snapshot log
-                        in loop log term leader_info end,
+                            val _ = print "applying snapshot"
+                        in loop newlog term leader_info end,
 
                     hn _ => loop log term leader_info
                 ] 
@@ -371,9 +375,9 @@ let fun not a = a = false
         let val p_id = self()
             val nonce = mkuuid()
             val _ = printString (id^": I am now a candidate")
-            val prevLogIndex = get_log_index log
+            val latestLogIndex = get_log_index log
             val prevLogTerm = get_latest_log_term log
-            val _ = send_to_all all_nodes ("RequestVote", (term, id, prevLogIndex, prevLogTerm, p_id)) (p_id)
+            val _ = send_to_all all_nodes ("RequestVote", (term, id, latestLogIndex, prevLogTerm, p_id)) (p_id)
             val req_votes = ((length all_nodes) / 2)
             fun won_election () = 
                 let val _ = printString (id^": I won the election")
@@ -477,18 +481,18 @@ let fun not a = a = false
                                 else reject ()
                     in follower all_nodes id newlog term voted_for leader state_machine
                     end,
-                hn ("AppendEntries", x, l_id, leader_term, prevLogIndex, prevLogTerm, leaderCommit) => 
+                hn ("AppendEntries", x, l_id, leader_term, latestLogIndex, prevLogTerm, leaderCommit) => 
                     let val leader = 
                             if leader = () orelse term < leader_term then l_id
                             else leader
                         val accepting = 
                             if leader_term < term then false
-                            else if prevLogIndex > (get_log_index log) then false
+                            else if latestLogIndex > (get_log_index log) then false
                             else if (get_latest_log_term log) <> prevLogTerm then false
                             else true
                         val newlog = 
                             if accepting then
-                                let val log = rollback_log_to log prevLogIndex
+                                let val log = rollback_log_to log latestLogIndex
                                     val log = add_entries_to_log log x leader_term
                                 in update_commit log (min leaderCommit (get_log_index log)) 
                                 end
@@ -614,16 +618,21 @@ let fun not a = a = false
         let
             val all_nodes = key_val_store_init n
             val _ = send_to_nth all_nodes ("debug-timeout") 1
+            val _ = sleep 2000
+            val _ = send_to_nth all_nodes ("debug-pause") 2
+            val _ = sleep 2000
             val _ = send_to_all all_nodes ("RAFT-UPDATE", ("Hello", "Here")) (self())
             val _ = send_to_all all_nodes ("RAFT-UPDATE", ("Hello", "There")) (self())
-            val _ = send_to_all all_nodes ("RAFT-UPDATE", ("Hello", "Everything")) (self())
-            val _ = send_to_all all_nodes ("RAFT-UPDATE", ("Hello", "Everywhere")) (self())
-            val _ = send_to_all all_nodes ("RAFT-UPDATE", ("All at", "once")) (self())
             val _ = sleep 2000
-            val _ = send_to_all all_nodes ("RAFT-UPDATE", ("Hello", "There")) (self())
-            val _ = send_to_all all_nodes ("debug-applysnapshot") (self())
+            val _ = send_to_all all_nodes ("debug-printlog") (self())
             val _ = sleep 2000
-            val _ = send_to_all all_nodes ("debug-applysnapshot") (self())
+            val _ = send_to_nth all_nodes ("debug-applysnapshot") 1
+            val _ = sleep 2000
+            val _ = send_to_nth all_nodes ("debug-continue") 2
+            val _ = sleep 2000
+            val _ = send_to_all all_nodes ("debug-printlog") (self())
+            val _ = sleep 2000
+            val _ = send_to_all all_nodes ("debug-printlog") (self())
         in receive [hn x => print x]
     end
 
