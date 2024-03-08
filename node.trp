@@ -119,7 +119,7 @@ let fun not a = a = false
         [] => 0 (* Should not be reachable*)
         | h :: _ => h.command
 
-    fun get_nth_command log index = nth (reverse log.log) index 
+    fun get_nth_command log index = nth (reverse log.log) (index - log.snapshot.lastIncludedIndex) 
 
     fun get_commands_after_nth log_list n =
         case log_list of
@@ -129,6 +129,9 @@ let fun not a = a = false
                 h :: (get_commands_after_nth t (n)) 
             else get_commands_after_nth t (n - 1)
 
+    fun uncommitted_entries log = slice (get_log_index log) log.commitIndex log.log
+
+
     fun apply_log log f = if log.lastApplied < log.commitIndex 
         then 
             let val _ = f ((get_nth_command log (log.lastApplied + 1)).command) 
@@ -136,10 +139,14 @@ let fun not a = a = false
             in apply_log log f end
         else log
     
-    fun apply_snapshot state_machine log =
+    fun get_snapshot state_machine log = 
         let val lastCommitted = get_nth_command log log.commitIndex
-            val uncommitted_entries = slice (get_log_index log) log.commitIndex log.log
-            val snapshot = take_snapshot state_machine log.commitIndex lastCommitted.term
+        in take_snapshot state_machine log.commitIndex lastCommitted.term
+    end
+
+    fun apply_snapshot state_machine snapshot log =
+        let val _ = send(state_machine.pid, snapshot.snapshot)
+            val uncommitted_entries = uncommitted_entries log
             val log = {log with log = uncommitted_entries}
         in { log with snapshot = snapshot }
     end
@@ -282,8 +289,12 @@ let fun not a = a = false
                     let 
                         val prevLogIndex = nextIndex.next - 1
                         val prevEntryTerm = if prevLogIndex > 0 then (get_nth_command log prevLogIndex).term else 0
-                        val entries = get_commands_after_nth (reverse log.log) prevLogIndex
-                    in send(node, ("AppendEntries", entries, p_id, term, nextIndex.next - 1, prevEntryTerm, log.commitIndex))
+                    in 
+                        if prevLogIndex < log.snapshot.lastIncludedIndex then send(node, ("Snapshot", log.snapshot, p_id, term))
+                        else 
+                            let val entries = get_commands_after_nth (reverse log.log) prevLogIndex
+                            in send(node, ("AppendEntries", entries, p_id, term, prevLogIndex, prevEntryTerm, log.commitIndex))
+                        end
                 end
                 else print "ERROR"
             end
@@ -345,9 +356,10 @@ let fun not a = a = false
                         ]
                         in pause () end,
                     hn ("debug-applysnapshot") =>
-                        let val _ = print state_machine
-                            val _ = print (apply_snapshot state_machine log)
+                        let val snapshot = get_snapshot state_machine log
+                            val newlog = apply_snapshot state_machine snapshot log
                         in loop log term leader_info end,
+
                     hn _ => loop log term leader_info
                 ] 
                 in ()  (* Vi skal sørge for at genstarte løkken i receive ellers opdatere loggen ikke*)
@@ -441,8 +453,34 @@ let fun not a = a = false
                         else if c_term <= term then no_vote ()
                         else yes_vote ()
                     end,
+                hn ("Snapshot", x, l_id, leader_term) =>
+                    let val leader = 
+                            if leader = () orelse term < leader_term then l_id
+                            else leader
+
+                        val {snapshot, lastIncludedIndex, lastIncludedTerm} = x
+
+                        val log_term = get_latest_log_term log
+                        val log_index = get_log_index log
+
+                        val accepting =
+                            if leader_term < term then false
+                            else if lastIncludedIndex <= log_index then false
+                            else true
+                        val newlog = if accepting then apply_snapshot x log else log
+                        val reject = fn () => send (l_id, ("REJECT", (p_id, {term = term, leader = leader}, (get_log_index newlog))))
+                        val ack = fn () => send (l_id, ("ACKNOWLEGDE", (p_id, get_log_index newlog)))
+
+                        val term = if term < leader_term then leader_term else term
+                        
+                        val _ = if accepting then ack ()
+                                else reject ()
+                    in follower all_nodes id newlog term voted_for leader state_machine
+                    end,
                 hn ("AppendEntries", x, l_id, leader_term, prevLogIndex, prevLogTerm, leaderCommit) => 
-                    let val leader = if leader <> () orelse term < leader_term then leader else l_id
+                    let val leader = 
+                            if leader = () orelse term < leader_term then l_id
+                            else leader
                         val accepting = 
                             if leader_term < term then false
                             else if prevLogIndex > (get_log_index log) then false
