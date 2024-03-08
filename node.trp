@@ -461,7 +461,7 @@ let fun not a = a = false
                     let val leader = 
                             if leader = () orelse term < leader_term then l_id
                             else leader
-
+                        val _ = print x
                         val {snapshot, lastIncludedIndex, lastIncludedTerm} = x
 
                         val log_term = get_latest_log_term log
@@ -471,7 +471,7 @@ let fun not a = a = false
                             if leader_term < term then false
                             else if lastIncludedIndex <= log_index then false
                             else true
-                        val newlog = if accepting then apply_snapshot x log else log
+                        val newlog = if accepting then apply_snapshot state_machine x log else log
                         val reject = fn () => send (l_id, ("REJECT", (p_id, {term = term, leader = leader}, (get_log_index newlog))))
                         val ack = fn () => send (l_id, ("ACKNOWLEGDE", (p_id, get_log_index newlog)))
 
