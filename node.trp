@@ -131,7 +131,6 @@ let fun not a = a = false
 
     fun uncommitted_entries log = slice (get_log_index log) log.commitIndex log.log
 
-
     fun apply_log log f = if log.lastApplied < log.commitIndex 
         then 
             let val _ = f ((get_nth_command log (log.lastApplied + 1)).command) 
