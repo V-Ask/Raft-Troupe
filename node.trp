@@ -147,7 +147,15 @@ let fun not a = a = false
     fun apply_snapshot state_machine snapshot log =
         let val _ = send(state_machine.pid, snapshot.snapshot)
             val uncommitted_entries = uncommitted_entries log
+            val newCommitIndex = 
+                if log.commitIndex < snapshot.lastIncludedIndex then snapshot.lastIncludedIndex
+                else log.commitIndex
+            val newLastApplied =
+                if log.lastApplied < snapshot.lastIncludedIndex then snapshot.lastIncludedIndex
+                else log.lastApplied
             val log = {log with log = uncommitted_entries}
+            val log = {log with commitIndex = newCommitIndex}
+            val log = {log with lastApplied = newLastApplied}
         in { log with snapshot = snapshot }
     end
     (* LOG FUNCTIONS END *)
