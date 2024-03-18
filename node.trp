@@ -511,10 +511,14 @@ let fun not a = a = false
                         val log_term = get_latest_log_term node.log
                         val log_index = get_log_index node.log
 
-                        val accepting =
-                            if leader_term < node.term then false
+                        val accepting = 
+                            if leader_term < term then false
                             else if lastIncludedIndex <= log_index then false
                             else true
+
+                        val newlog = if accepting then apply_snapshot state_machine x log else log
+                        val reject = fn () => send (l_id, ("REJECT", (p_id, {term = term, leader = leader}, (get_log_index newlog))))
+                        val ack = fn () => send (l_id, ("ACKNOWLEGDE", (p_id, get_log_index newlog)))
 
                         val newlog = if accepting then apply_snapshot node.state_machine x node.log else node.log
                         val reject = 
