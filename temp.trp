@@ -1,0 +1,3 @@
+let val x = {a = 10}
+in x.b
+end
