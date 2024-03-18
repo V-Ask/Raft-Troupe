@@ -284,7 +284,7 @@ let fun not a = a = false
     end
     (* KEY VALUE FUNCTIONS END*)
 
-    fun verbose_print x node = if node.verbose then print x else ()
+    fun verbose_print x verbose = if verbose then print x else ()
 
     fun start_timeout func duration = 
         let fun timeout () = 
@@ -323,7 +323,7 @@ let fun not a = a = false
             end
 
             fun demote term leader voted_for node = 
-                let val node = { node with term = term}
+                let val node = { node with term = term }
                     val node = { node with leader = leader}
                     val node = { node with leader_info = ()}
                 in {node with voted_for = voted_for}
@@ -410,8 +410,7 @@ let fun not a = a = false
 
     and candidate node =
         let val p_id = self()
-            val node = {node with voted_for = ()}
-            val node = {node with leader = ()}
+            val node = {node with voted_for = (), leader = ()}
             val nonce = mkuuid()
             val _ = verbose_print (node.id^": I am now a candidate") node
             val latestLogIndex = get_log_index node.log
@@ -434,8 +433,7 @@ let fun not a = a = false
 
                     hn ("RequestVote", (c_term, other_c_id, c_log_index, c_log_term, p_id)) when c_term > node.term =>
                         let val _ = send(p_id, ("YES-VOTE", node.id))
-                            val node = { node with term = c_term}
-                        in follower ({ node with voted_for = other_c_id})
+                        in follower ({ node with term = c_term, voted_for = other_c_id})
                         end,
                     
                     hn ("AppendEntries", x, l_id, other_term, prevIndex, prevTerm, commitIndex) when other_term >= node.term => 
@@ -641,11 +639,14 @@ let fun not a = a = false
         in dialer cluster
     end
 
-    fun raft state_machine_func set_hook get_hook get_snapshot_hook set_snapshot_hook verbose =
+    fun raft_dial state_machine_func set_hook get_hook get_snapshot_hook set_snapshot_hook verbose =
         let val nodes = initiate_nodes 5 state_machine_func set_hook get_hook get_snapshot_hook set_snapshot_hook verbose
             val dialer = (fn () => dialer nodes)
         in spawn dialer
     end
+
+    fun raft state_machine_func set_hook get_hook get_snapshot_hook set_snapshot_hook verbose =
+        initiate_nodes 5 state_machine_func set_hook get_hook get_snapshot_hook set_snapshot_hook verbose
     
     fun key_val_store_init verbose =
         raft key_val_store 
@@ -655,9 +656,8 @@ let fun not a = a = false
             (fn x => ("SET_SNAPSHOT", x))
             verbose
 
-        fun test_local n = 
-        let 
-            val all_nodes = key_val_store_init n true
+    fun test_local n = 
+        let val all_nodes = key_val_store_init n true
             val _ = send_to_nth all_nodes ("debug-timeout") 1
             val _ = sleep 2000
             val _ = send_to_all all_nodes ("RAFT-UPDATE", ("Hello", "There")) (self())
@@ -689,25 +689,6 @@ let fun not a = a = false
             val all_nodes = key_val_store_init n true
             val _ = send_to_nth all_nodes ("debug-timeout") 1
             val _ = sleep 2000
-            val _ = send_to_nth all_nodes ("debug-pause") 2
-            val _ = sleep 2000
-            val _ = send_to_all all_nodes ("RAFT-UPDATE", ("Hello", "Here")) (self())
-            val _ = send_to_all all_nodes ("RAFT-UPDATE", ("Hello", "There")) (self())
-            val _ = sleep 2000
-            val _ = send_to_nth all_nodes ("debug-applysnapshot") 1
-            val _ = sleep 2000
-            val _ = send_to_nth all_nodes ("debug-continue") 2
-            val _ = sleep 2000
-            val _ = send_to_nth all_nodes ("debug-pause") 1
-            val _ = send_to_nth all_nodes ("debug-timeout") 3
-            val _ = sleep 2000
-            val _ = send_to_all all_nodes ("RAFT-UPDATE", ("Hello", "Somewhere?")) (self())
-            val _ = sleep 2000
-            val _ = send_to_nth all_nodes ("debug-applysnapshot") 3
-            val _ = sleep 2000
-            val _ = send_to_nth all_nodes ("debug-continue") 1
-            val _ = sleep 2000
-            val _ = send_to_all all_nodes ("debug-printlog") (self())
         in receive [hn x => print x]
     end
 
@@ -726,18 +707,6 @@ let fun not a = a = false
             val _ = sleep 2000
             val _ = send_to_all all_nodes ("debug-printlog") (self())
         in receive [hn x => print x]
-    end
-
-    fun test_dialer () =
-        let val raft = key_val_store_init true
-            val p_id = self()
-            val _ = sleep 2000
-            val _ = send(raft, ("RAFT-UPDATE", ("Victor", "Gruppemedlem 1")))
-            val _ = sleep 500
-            val _ = send(raft, ("RAFT-GET", ("Victor", p_id)))
-            val debug = receive [hn x => x]
-            val _ = print debug
-        in receive [hn x => x]
     end
         
 in test_dialer ()
