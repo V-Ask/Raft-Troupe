@@ -401,7 +401,11 @@ let fun not a = a = false
                             val node = {node with log = apply_snapshot node.state_machine snapshot node.log}
                             val _ = verbose_print (node.id^": applying snapshot") node.verbose
                         in loop node end,
-
+                        hn ("print-entries") =>
+                        let val _ = print node.id
+                            val _ = print node.log.entries
+                            val _ = print node.log.snapshot.snapshot
+                        in loop node end,
                     hn _ => loop node
                 ] 
                 in ()  (* Vi skal sørge for at genstarte løkken i receive ellers opdatere loggen ikke*)
@@ -564,6 +568,11 @@ let fun not a = a = false
                     let val _ = print node.id
                         val _ = print node.log 
                     in loop node end,
+                hn ("print-entries") =>
+                    let val _ = print node.id
+                        val _ = print node.log.entries
+                        val _ = print node.log.snapshot.snapshot
+                    in loop node end,
                 hn ("debug-pause") =>
                     let fun loop () = receive [
                         hn ("debug-continue") => (),
@@ -657,8 +666,8 @@ let fun not a = a = false
             (fn x => ("SET_SNAPSHOT", x))
             verbose
 
-    fun test_local n = 
-        let val all_nodes = key_val_store_init n true
+    fun test_local () = 
+        let val all_nodes = key_val_store_init true
             val _ = send_to_nth all_nodes ("debug-timeout") 1
             val _ = sleep 2000
             val _ = send_to_all all_nodes ("RAFT-UPDATE", ("Hello", "There")) (self())
@@ -676,20 +685,12 @@ let fun not a = a = false
         in receive [hn x => print x]
     end
 
-    fun test2_local n = 
+    fun test2_local () = 
         let 
-            val all_nodes = key_val_store_init n true
+            val all_nodes = key_val_store_init true
             val _ = send_to_nth all_nodes ("debug-timeout") 1
             val _ = send_to_nth all_nodes ("debug-timeout") 2
             val _ = sleep 10000
-        in receive [hn x => print x]
-    end
-
-    fun test_snapshot n =
-        let
-            val all_nodes = key_val_store_init n true
-            val _ = send_to_nth all_nodes ("debug-timeout") 1
-            val _ = sleep 2000
         in receive [hn x => print x]
     end
 
@@ -709,6 +710,27 @@ let fun not a = a = false
             val _ = send_to_all all_nodes ("debug-printlog") (self())
         in receive [hn x => print x]
     end
-        
-in key_val_store_init true
+    
+    fun test_snapshot () =
+        let
+            val all_nodes = key_val_store_init true
+            val _ = send_to_nth all_nodes ("debug-timeout") 1
+            val _ = sleep 100
+            val _ = send_to_nth all_nodes ("debug-pause") 3
+            val _ = sleep 100
+            val _ = send_to_nth all_nodes ("RAFT-UPDATE", ("A", 1)) 1
+            val _ = sleep 50
+            val _ = send_to_nth all_nodes ("RAFT-UPDATE", ("A", 2)) 1
+            val _ = sleep 50
+            val _ = send_to_nth all_nodes ("RAFT-UPDATE", ("A", 4)) 1
+            val _ = sleep 100
+            val _ = send_to_nth all_nodes ("debug-applysnapshot") 1
+            val _ = sleep 100
+            val _ = send_to_nth all_nodes ("debug-continue") 3
+            val _ = sleep 500
+            val _ = send_to_all all_nodes ("debug-printlog") (self())
+        in receive [hn x => print x]
+    end
+
+in test_snapshot ()
 end
