@@ -343,7 +343,7 @@ let fun not a = a = false
                 let val node = apply_committed node
                 val _ = receive [
                     hn ("SEND_HEARTBEAT", x) when nonce = x =>
-                        let val _ = verbose_print (node.id^": Sending heartbeat") node
+                        let val _ = verbose_print (node.id^": Sending heartbeat") node.verbose
                         in leader_node node end,
                     
                     hn ("RAFT-UPDATE", x) => 
@@ -352,7 +352,7 @@ let fun not a = a = false
                             val node = {node with log = append_message node.log (node.state_machine.sethook x) node.term}
                             val node = { node with leader_info = update_match_index node.leader_info p_id (get_log_index node.log)}
                             val node = { node with leader_info = update_next_index node.leader_info p_id ((get_log_index node.log) + 1) }
-                            val _ = verbose_print (node.id^": Appending new message to log") node
+                            val _ = verbose_print (node.id^": Appending new message to log") node.verbose
                         in leader_node node end,
 
                     hn ("RAFT-GET", x) =>
@@ -376,12 +376,12 @@ let fun not a = a = false
                         end,
 
                     hn ("Snapshot", snapshot, l_id, other_term) when other_term > node.term =>
-                        let val _ = verbose_print (node.id^": received Snapshot from leader, I must have lost position") node
+                        let val _ = verbose_print (node.id^": received Snapshot from leader, I must have lost position") node.verbose
                         in follower (demote other_term l_id () node)
                         end,
 
                     hn ("AppendEntries", x, l_id, other_term, prevIndex, prevTerm, commitIndex) when other_term > node.term => 
-                        let val _ = verbose_print (node.id^": received AppendEntries from leader, I must have lost position") node
+                        let val _ = verbose_print (node.id^": received AppendEntries from leader, I must have lost position") node.verbose
                         in follower (demote other_term l_id () node)
                         end,
                         
@@ -399,7 +399,7 @@ let fun not a = a = false
                     hn ("debug-applysnapshot") =>
                         let val snapshot = get_snapshot node.state_machine node.log
                             val node = {node with log = apply_snapshot node.state_machine snapshot node.log}
-                            val _ = verbose_print (node.id^": applying snapshot") node
+                            val _ = verbose_print (node.id^": applying snapshot") node.verbose
                         in loop node end,
 
                     hn _ => loop node
@@ -413,13 +413,13 @@ let fun not a = a = false
         let val p_id = self()
             val node = {node with voted_for = (), leader = ()}
             val nonce = mkuuid()
-            val _ = verbose_print (node.id^": I am now a candidate") node
+            val _ = verbose_print (node.id^": I am now a candidate") node.verbose
             val latestLogIndex = get_log_index node.log
             val prevLogTerm = get_latest_log_term node.log
             val _ = send_to_all node.all_nodes ("RequestVote", (node.term, node.id, latestLogIndex, prevLogTerm, p_id)) (p_id)
             val req_votes = ((length node.all_nodes) / 2)
             fun won_election () = 
-                let val _ = verbose_print (node.id^": I won the election") node
+                let val _ = verbose_print (node.id^": I won the election") node.verbose
                 in leader_node { node with leader_info = (new_leader node.all_nodes node.log) }
             end
             
@@ -438,7 +438,7 @@ let fun not a = a = false
                         end,
                     
                     hn ("AppendEntries", x, l_id, other_term, prevIndex, prevTerm, commitIndex) when other_term >= node.term => 
-                        let val _ = verbose_print (node.id^": received AppendEntries from leader, I must have lost position") node
+                        let val _ = verbose_print (node.id^": received AppendEntries from leader, I must have lost position") node.verbose
                         in follower ({ node with leader = l_id})
                         end,
 
@@ -467,7 +467,7 @@ let fun not a = a = false
             fun loop node = 
                 let val log = apply_log node.log (fn x => send (node.state_machine.pid, x))
                 fun start_election () =
-                    let val _ = verbose_print (node.id^": START ELECTION") node
+                    let val _ = verbose_print (node.id^": START ELECTION") node.verbose
                     in candidate ({node with term = node.term + 1})
                     end
                 val _ = receive [
@@ -478,7 +478,7 @@ let fun not a = a = false
 
                 hn ("RequestVote", (c_term, c_id, c_log_index, c_log_term, p_id)) when c_id = node.voted_for =>
                     let val _ = send(p_id, ("YES-VOTE", node.id))
-                        val _ = verbose_print (node.id^": Voting yes") node
+                        val _ = verbose_print (node.id^": Voting yes") node.verbose
                         in follower (vote_for c_id c_term node)
                         end,
                 
@@ -487,12 +487,12 @@ let fun not a = a = false
                         val latestLogTerm = get_latest_log_term node.log
                         fun no_vote () =
                             let val _ = send(p_id, "NO-VOTE")
-                                val _ = verbose_print (node.id^":voting no") node
+                                val _ = verbose_print (node.id^":voting no") node.verbose
                             in follower node
                         end
                         fun yes_vote () =
                             let val _ = send(p_id, ("YES-VOTE", node.id))
-                                val _ = verbose_print (node.id^": Voting yes") node
+                                val _ = verbose_print (node.id^": Voting yes") node.verbose
                             in follower (vote_for c_id c_term node)
                         end
                     in 
@@ -511,11 +511,11 @@ let fun not a = a = false
                         val log_index = get_log_index node.log
 
                         val accepting = 
-                            if leader_term < term then false
+                            if leader_term < node.term then false
                             else if lastIncludedIndex <= log_index then false
                             else true
 
-                        val newlog = if accepting then apply_snapshot state_machine x log else log
+                        val newlog = if accepting then apply_snapshot node.state_machine x node.log else node.log
                         val reject = fn () => send (l_id, ("REJECT", (p_id, {term = term, leader = leader}, (get_log_index newlog))))
                         val ack = fn () => send (l_id, ("ACKNOWLEGDE", (p_id, get_log_index newlog)))
 
@@ -555,7 +555,7 @@ let fun not a = a = false
                         val node = {node with term = (if node.term < leader_term then leader_term else node.term)}
                         val _ = if accepting then ack ()
                                 else 
-                                    let val _ = verbose_print (node.id^": REJECTING") node
+                                    let val _ = verbose_print (node.id^": REJECTING") node.verbose
                                     in reject ()
                                     end
                     in follower {node with log = newlog}
@@ -710,5 +710,5 @@ let fun not a = a = false
         in receive [hn x => print x]
     end
         
-in test_dialer ()
+in key_val_store_init true
 end
