@@ -20,6 +20,19 @@ import quickselect
 *)
 
 (*
+    LeaderInfo = {
+        nextIndex = {
+            peer: p,
+            next: int
+        }[],
+        matchIndex = {
+            peer: p,
+            match: int
+        }[]
+    }
+*)
+
+(*
     StateMachine = {
         set_hook: string,
         get_hook: string,
@@ -179,18 +192,6 @@ let fun not a = a = false
     (* LOG FUNCTIONS END *)
 
 
-    (*
-        LeaderInfo = {
-            nextIndex = {
-                peer: p,
-                next: int
-            }[],
-            matchIndex = {
-                peer: p,
-                match: int
-            }[]
-        }
-    *)
 
     (* LEADERINFO FUNCTIONS BEGIN*)
 
