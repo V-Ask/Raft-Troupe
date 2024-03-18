@@ -370,6 +370,23 @@ let fun not a = a = false
                             in loop node 
                             end
                         else follower (demote terminfo.term terminfo.leader () node),
+                    hn ("SEND_HEARTBEAT", x) when nonce = x =>
+                        let val _ = verbose_print (node.id^": Sending heartbeat") node.verbose
+                        in leader_node node end,
+                    
+                    hn ("RAFT-UPDATE", x) => 
+                        let val latestLogIndex = get_log_index node.log
+                            val prevLogTerm = get_latest_log_term node.log
+                            val node = {node with log = append_message node.log (node.state_machine.sethook x) node.term}
+                            val node = { node with leader_info = update_match_index node.leader_info p_id (get_log_index node.log)}
+                            val node = { node with leader_info = update_next_index node.leader_info p_id ((get_log_index node.log) + 1) }
+                            val _ = verbose_print (node.id^": Appending new message to log") node.verbose
+                        in loop node end,
+
+                    hn ("RAFT-GET", x) =>
+                        let val _ = send (node.state_machine.pid, (node.state_machine.gethook x))
+                        in loop node end,
+
                     hn ("RequestVote", (c_term, other_c_id, c_log_index, c_log_term, p_id)) when c_term > node.term =>
                         let val _ = send(p_id, ("YES-VOTE", node.id))
                         in follower (demote c_term () other_c_id node)
@@ -705,8 +722,17 @@ let fun not a = a = false
             (fn x => ("SET_SNAPSHOT", x))
             verbose
 
-    fun test1_local () = 
-        let val all_nodes = key_val_store_init true
+    fun send_n_messages all_nodes m n msg =
+        let fun loop n =
+            let val _ = send_to_nth all_nodes msg m
+            val _ = print n
+            val _ = sleep 500
+            in if n > 0 then loop (n - 1) else () end 
+        in loop n 
+    end
+
+    fun test_local n = 
+        let val all_nodes = key_val_store_init n true
             val _ = send_to_nth all_nodes ("debug-timeout") 1
             val _ = sleep 2000
             val _ = send_to_all all_nodes ("RAFT-UPDATE", ("Hello", "There")) (self())
@@ -781,5 +807,17 @@ let fun not a = a = false
         in receive [hn x => print x]
     end
 
-in test3_local ()
+    fun test_lots_of_messages () = 
+        let 
+            val all_nodes = key_val_store_init true 
+            val _ = send_to_nth all_nodes ("debug-timeout") 1
+            val _ = sleep 2000
+            val _ = send_n_messages all_nodes 1 100 ("RAFT-UPDATE", ("TEST", "TEST"))
+            val _ = send_to_all all_nodes ("debug-applysnapshot") (self())
+            val _ = sleep 1000
+            val _ = send_n_messages all_nodes 1 20 ("RAFT-UPDATE", ("TEST", "TEST"))
+            val _ = send_to_all all_nodes ("debug-printlog") (self())
+        in () end
+        
+in test_lots_of_messages ()
 end
