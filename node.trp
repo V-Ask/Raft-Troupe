@@ -747,7 +747,20 @@ let fun not a = a = false
             val _ = send_to_nth all_nodes ("RAFT-UPDATE", ("Hello", "Other World")) 1
             val _ = sleep 2000
             val _ = send_to_all all_nodes ("debug-printlog") (self())
-        in receive [hn x => print x]
+        in 
+            send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
+            sleep 500;
+            send(raft, ("RAFT-UPDATE", ("Hello", "There")));
+            print "killing I";
+            sleep 1000;
+            send(raft, ("SEND-TO-NTH", 1, "debug-pause"));
+            sleep 2000;
+            send(raft, ("RAFT-UPDATE", ("Hello", "World")));
+            sleep 2000;
+            print "reviving I";
+            send(raft, ("SEND-TO-NTH", 1, "debug-continue"));
+            send(raft, ("SEND-TO-NTH", 1, ("RAFT-UPDATE", ("Hello", "Other World"))));
+            sleep 2000;
     end
 
     fun test2_local () = 
@@ -761,12 +774,12 @@ let fun not a = a = false
     fun test3_local () = 
         let val p_id = self()
             val raft = key_val_store_init_dial true
-            val _ = sleep 2000;
-                    send(raft, ("RAFT-UPDATE", ("A", 42)));
-                    sleep 1000;
-                    send(raft, ("RAFT-GET", ("A", p_id)));
-                    receive [hn x => print x]
-        in ()
+        in 
+            sleep 2000;
+            send(raft, ("RAFT-UPDATE", ("A", 42)));
+            sleep 1000;
+            send(raft, ("RAFT-GET", ("A", p_id)));
+            receive [hn x => print x]
     end
 
     fun initiate_3_distributed_nodes () =
