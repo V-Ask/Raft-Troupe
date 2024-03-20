@@ -689,6 +689,8 @@ let fun not a = a = false
                         in leader_id end,
                     hn ("SEND-TO-NTH", n, x) =>
                         send_to_nth cluster x n,
+                    hn ("SEND-TO-ALL", x) => 
+                        send_to_all cluster ("debug-printlog") (self()),
                     hn x =>
                         let val _ = send(leader, x); print x
                         in leader
@@ -731,23 +733,9 @@ let fun not a = a = false
         in loop n 
     end
 
-    fun test_local n = 
-        let val all_nodes = key_val_store_init n true
-            val _ = send_to_nth all_nodes ("debug-timeout") 1
-            val _ = sleep 2000
-            val _ = send_to_all all_nodes ("RAFT-UPDATE", ("Hello", "There")) (self())
-            val _ = sleep 2000
-            val _ = print "killing I"
-            val _ = send_to_nth all_nodes ("debug-pause") 1
-            val _ = sleep 2000
-            val _ = send_to_all all_nodes ("RAFT-UPDATE", ("Hello", "World")) (self())
-            val _ = sleep 2000
-            val _ = print "reviving I"
-            val _ = send_to_nth all_nodes ("debug-continue") 1
-            val _ = send_to_nth all_nodes ("RAFT-UPDATE", ("Hello", "Other World")) 1
-            val _ = sleep 2000
-            val _ = send_to_all all_nodes ("debug-printlog") (self())
-        in 
+    fun test_local1 n = 
+        let val raft = key_val_store_init_dial true
+        in
             send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
             sleep 500;
             send(raft, ("RAFT-UPDATE", ("Hello", "There")));
@@ -761,6 +749,7 @@ let fun not a = a = false
             send(raft, ("SEND-TO-NTH", 1, "debug-continue"));
             send(raft, ("SEND-TO-NTH", 1, ("RAFT-UPDATE", ("Hello", "Other World"))));
             sleep 2000;
+            send(raft, ("SEND-TO-NTH", "debug-log"))
     end
 
     fun test2_local () = 
@@ -832,5 +821,5 @@ let fun not a = a = false
             val _ = send_to_all all_nodes ("debug-printlog") (self())
         in () end
         
-in test_lots_of_messages ()
+in test_local ()
 end
