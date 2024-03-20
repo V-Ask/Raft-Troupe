@@ -489,7 +489,7 @@ let fun not a = a = false
                 in {node with term = c_term} 
             end
             fun loop node = 
-                let val log = apply_log node.log (fn x => send (node.state_machine.pid, x))
+                let val node = { node with log = apply_log node.log (fn x => send (node.state_machine.pid, x)) }
                 fun start_election () =
                     let val _ = verbose_print (node.id^": START ELECTION") node.verbose
                     in candidate ({node with term = node.term + 1})
@@ -530,7 +530,6 @@ let fun not a = a = false
                             if node.leader = () orelse node.term < leader_term then l_id
                             else node.leader}
                         val {snapshot, lastIncludedIndex, lastIncludedTerm} = x
-
                         val log_term = get_latest_log_term node.log
                         val log_index = get_log_index node.log
 
@@ -561,8 +560,8 @@ let fun not a = a = false
                             else node.leader}
                         val accepting = 
                             if leader_term < node.term then false
-                            else if latestLogIndex > (get_log_index log) then false
-                            else if (get_latest_log_term log) <> prevLogTerm then false
+                            else if latestLogIndex > (get_log_index node.log) then false
+                            else if (get_latest_log_term node.log) <> prevLogTerm then false
                             else true
                         val newlog = 
                             if accepting then
@@ -673,28 +672,45 @@ let fun not a = a = false
             fun loop leader =     
                 let val leader = receive [
                     hn ("RAFT-UPDATE", x) =>
-                        let val _ = send(leader, (("RAFT-UPDATE", x), p_id))
-                            in leader
-                        end,
+                        send(leader, (("RAFT-UPDATE", x), p_id));
+                        leader,
+
                     hn ("RAFT-GET", x) =>
-                        let val _ = send(leader, (("RAFT-GET", x), p_id))
-                                in leader
-                            end,
+                        send(leader, (("RAFT-GET", x), p_id));
+                        leader,
+
                     hn ("UPDATE-NOT-LEADER", leader_id, x) => 
-                        let val _ = send(leader_id, (("RAFT-UPDATE", x), p_id))
-                        in leader_id end,
+                        let val leader = 
+                            if leader_id = () then 
+                                sleep 20;
+                                leader
+                            else leader_id
+                        in 
+                            send(leader, (("RAFT-UPDATE", x), p_id));
+                            leader
+                        end,
 
                     hn ("GET-NOT-LEADER", leader_id, x) => 
-                        let val _ = send(leader_id, (("RAFT-GET", x), p_id))
-                        in leader_id end,
+                        let val leader = 
+                            if leader_id = () then 
+                                sleep 20;
+                                leader
+                            else leader_id
+                        in 
+                            send(leader, (("RAFT-GET", x), p_id));
+                            leader
+                        end,
+
                     hn ("SEND-TO-NTH", n, x) =>
-                        send_to_nth cluster x n,
+                        send_to_nth cluster x n;
+                        leader,
+
                     hn ("SEND-TO-ALL", x) => 
-                        send_to_all cluster ("debug-printlog") (self()),
+                        send_to_all cluster ("debug-printlog") (self());
+                        leader,
                     hn x =>
-                        let val _ = send(leader, x); print x
-                        in leader
-                    end]
+                        send(leader, x); print x;
+                        leader ]
                 in loop leader end
         in loop leader
     end
@@ -724,12 +740,12 @@ let fun not a = a = false
             (fn x => ("SET_SNAPSHOT", x))
             verbose
 
-    fun send_n_messages all_nodes m n msg =
+    fun send_n_updates raft n =
         let fun loop n =
-            let val _ = send_to_nth all_nodes msg m
-            val _ = print n
-            val _ = sleep 500
-            in if n > 0 then loop (n - 1) else () end 
+            let val _ = send(raft, ("RAFT-UPDATE", ("TEST", "TEST")));
+                        print n;
+                        sleep 10
+            in if n > 1 then loop (n - 1) else () end 
         in loop n 
     end
 
@@ -739,8 +755,8 @@ let fun not a = a = false
             send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
             sleep 500;
             send(raft, ("RAFT-UPDATE", ("Hello", "There")));
-            print "killing I";
             sleep 1000;
+            print "killing I";
             send(raft, ("SEND-TO-NTH", 1, "debug-pause"));
             sleep 2000;
             send(raft, ("RAFT-UPDATE", ("Hello", "World")));
@@ -749,7 +765,7 @@ let fun not a = a = false
             send(raft, ("SEND-TO-NTH", 1, "debug-continue"));
             send(raft, ("SEND-TO-NTH", 1, ("RAFT-UPDATE", ("Hello", "Other World"))));
             sleep 2000;
-            send(raft, ("SEND-TO-NTH", "debug-log"))
+            send(raft, ("SEND-TO-ALL", "debug-log"))
     end
 
     fun test2_local () = 
@@ -771,7 +787,54 @@ let fun not a = a = false
             receive [hn x => print x]
     end
 
-    fun initiate_3_distributed_nodes () =
+    fun test4_local () = 
+        let val raft = key_val_store_init_dial true
+        in
+            send(raft, ("RAFT-UPDATE", ("Hello", "There")));
+            send(raft, ("RAFT-UPDATE", ("Hello", "There")));
+            send(raft, ("RAFT-UPDATE", ("Hello", "There")));
+            send(raft, ("RAFT-UPDATE", ("Hello", "There")));
+            send(raft, ("RAFT-UPDATE", ("Hello", "There")));
+            send(raft, ("RAFT-UPDATE", ("Hello", "There")));
+            send(raft, ("RAFT-UPDATE", ("Hello", "There")));
+            send(raft, ("RAFT-UPDATE", ("Hello", "There")));
+            sleep 5000;
+            send(raft, ("SEND-TO-ALL", "debug-log"))
+    end
+
+    fun test_snapshot () =
+        let val raft = key_val_store_init_dial true
+        in 
+            send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
+            sleep 100;
+            send(raft, ("SEND-TO-NTH", 3, "debug-pause"));
+            send(raft, ("RAFT-UPDATE", ("A", 1)));
+            sleep 50;
+            send(raft, ("RAFT-UPDATE", ("A", 2)));
+            sleep 50;
+            send(raft, ("RAFT-UPDATE", ("A", 4)));
+            sleep 100;
+            send(raft, ("SEND-TO-NTH", 1, "debug-applysnapshot"));
+            sleep 100;
+            send(raft, ("SEND-TO-NTH", 3, "debug-continue"));
+            sleep 500;
+            send(raft, ("SEND-TO-ALL", "debug-log"))
+    end
+
+    fun test_lots_of_messages () = 
+        let val raft = key_val_store_init_dial true 
+        in 
+            send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
+            sleep 2000;
+            send_n_updates raft 1000;
+            sleep 5000;
+            send_n_updates raft 1000;
+            sleep 1000;
+            send(raft, ("SEND-TO-ALL", "debug-log"))
+
+    end
+    
+    (*fun initiate_3_distributed_nodes () =
         let 
             val node1 = initiate_distributed_node [] "1" "@node1" key_val_store
             val node2 = initiate_distributed_node [node1] "2" "@node2" key_val_store
@@ -786,40 +849,7 @@ let fun not a = a = false
             val _ = sleep 2000
             val _ = send_to_all all_nodes ("debug-printlog") (self())
         in receive [hn x => print x]
-    end
-    
-    fun test_snapshot () =
-        let
-            val all_nodes = key_val_store_init true
-            val _ = send_to_nth all_nodes ("debug-timeout") 1
-            val _ = sleep 100
-            val _ = send_to_nth all_nodes ("debug-pause") 3
-            val _ = sleep 100
-            val _ = send_to_nth all_nodes ("RAFT-UPDATE", ("A", 1)) 1
-            val _ = sleep 50
-            val _ = send_to_nth all_nodes ("RAFT-UPDATE", ("A", 2)) 1
-            val _ = sleep 50
-            val _ = send_to_nth all_nodes ("RAFT-UPDATE", ("A", 4)) 1
-            val _ = sleep 100
-            val _ = send_to_nth all_nodes ("debug-applysnapshot") 1
-            val _ = sleep 100
-            val _ = send_to_nth all_nodes ("debug-continue") 3
-            val _ = sleep 500
-            val _ = send_to_all all_nodes ("debug-printlog") (self())
-        in receive [hn x => print x]
-    end
-
-    fun test_lots_of_messages () = 
-        let 
-            val all_nodes = key_val_store_init true 
-            val _ = send_to_nth all_nodes ("debug-timeout") 1
-            val _ = sleep 2000
-            val _ = send_n_messages all_nodes 1 100 ("RAFT-UPDATE", ("TEST", "TEST"))
-            val _ = send_to_all all_nodes ("debug-applysnapshot") (self())
-            val _ = sleep 1000
-            val _ = send_n_messages all_nodes 1 20 ("RAFT-UPDATE", ("TEST", "TEST"))
-            val _ = send_to_all all_nodes ("debug-printlog") (self())
-        in () end
+    end*)
         
-in test_local ()
+in test_lots_of_messages ()
 end
