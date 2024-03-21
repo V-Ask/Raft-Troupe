@@ -38,6 +38,10 @@ import quickselect
         get_hook: string,
         snapshothook: fn a, b => ... return true they should be merged, false otherwise
     }
+    LogManifest = {
+        log_size: int,
+        entries_since_snap: int
+    }
 
 *)
 
@@ -277,6 +281,10 @@ let fun not a = a = false
                     in dic
                     end,
                 hn ("SET_SNAPSHOT", other_dic) => loop other_dic,
+                hn ("SNAPSHOT?", (log_manifest, sender_id)) => 
+                    let val callback = log_manifest.log_size > (length dic) 
+                        andalso log_manifest.entries_since_snap > 50
+                    in send(sender_id, ("CALLBACK", callback)) end,
                 hn ("DROP", key) => drop key dic
             ]
             in loop dic
@@ -715,30 +723,24 @@ let fun not a = a = false
         in loop leader
     end
 
-    fun raft_dial state_machine_func set_hook get_hook get_snapshot_hook set_snapshot_hook verbose =
+    fun raft state_machine_func set_hook get_hook get_snapshot_hook set_snapshot_hook verbose =
         let val nodes = initiate_nodes 5 state_machine_func set_hook get_hook get_snapshot_hook set_snapshot_hook verbose
             val dialer = (fn () => dialer nodes)
         in spawn dialer
     end
 
-    fun raft state_machine_func set_hook get_hook get_snapshot_hook set_snapshot_hook verbose =
-        initiate_nodes 5 state_machine_func set_hook get_hook get_snapshot_hook set_snapshot_hook verbose
-    
     fun key_val_store_init verbose =
         raft key_val_store 
             (fn x => case x of (key, value) => ("SET", (key, value))) 
             (fn (x, callback_pid) => ("GET", (x, callback_pid)))
             (fn (callback_pid) => ("GET_SNAPSHOT", callback_pid))
             (fn x => ("SET_SNAPSHOT", x))
+            (fn (log_manifest, callback_pid) => ("SNAPSHOT?", (log_manifest, callback_pid)))
             verbose
 
-    fun key_val_store_init_dial verbose =
-        raft_dial key_val_store 
-            (fn x => case x of (key, value) => ("SET", (key, value))) 
-            (fn (x, callback_pid) => ("GET", (x, callback_pid)))
-            (fn (callback_pid) => ("GET_SNAPSHOT", callback_pid))
-            (fn x => ("SET_SNAPSHOT", x))
-            verbose
+    fun send_delay (to, m) delay =
+        sleep delay;
+        send (to, m)
 
     fun send_n_updates raft n =
         let fun loop n =
@@ -750,45 +752,38 @@ let fun not a = a = false
     end
 
     fun test_local1 n = 
-        let val raft = key_val_store_init_dial true
+        let val raft = key_val_store_init true
         in
             send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
-            sleep 500;
-            send(raft, ("RAFT-UPDATE", ("Hello", "There")));
-            sleep 1000;
+            send_delay(raft, ("RAFT-UPDATE", ("Hello", "There"))) 500;
+            send_delay(raft, ("SEND-TO-NTH", 1, "debug-pause")) 1000;
             print "killing I";
-            send(raft, ("SEND-TO-NTH", 1, "debug-pause"));
-            sleep 2000;
-            send(raft, ("RAFT-UPDATE", ("Hello", "World")));
-            sleep 2000;
+            send(raft, ("RAFT-UPDATE", ("Hello", "World"))) 2000;
             print "reviving I";
-            send(raft, ("SEND-TO-NTH", 1, "debug-continue"));
+            send_delay(raft, ("SEND-TO-NTH", 1, "debug-continue")) 2000;
             send(raft, ("SEND-TO-NTH", 1, ("RAFT-UPDATE", ("Hello", "Other World"))));
-            sleep 2000;
-            send(raft, ("SEND-TO-ALL", "debug-log"))
+            send_delay(raft, ("SEND-TO-ALL", "debug-log")) 2000
     end
 
     fun test2_local () = 
-        let val raft = key_val_store_init_dial true
+        let val raft = key_val_store_init true
         in 
             send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
             send(raft, ("SEND-TO-NTH", 2, "debug-timeout"));
-            sleep 1000
+            send_delay(raft, ("SEND-TO-ALL", "debug-log")) 1000
     end
 
     fun test3_local () = 
         let val p_id = self()
-            val raft = key_val_store_init_dial true
+            val raft = key_val_store_init true
         in 
-            sleep 2000;
-            send(raft, ("RAFT-UPDATE", ("A", 42)));
-            sleep 1000;
-            send(raft, ("RAFT-GET", ("A", p_id)));
+            send_delay(raft, ("RAFT-UPDATE", ("A", 42))) 2000;
+            send_delay(raft, ("RAFT-GET", ("A", p_id))) 1000;
             receive [hn x => print x]
     end
 
     fun test4_local () = 
-        let val raft = key_val_store_init_dial true
+        let val raft = key_val_store_init true
         in
             send(raft, ("RAFT-UPDATE", ("Hello", "There")));
             send(raft, ("RAFT-UPDATE", ("Hello", "There")));
@@ -798,39 +793,32 @@ let fun not a = a = false
             send(raft, ("RAFT-UPDATE", ("Hello", "There")));
             send(raft, ("RAFT-UPDATE", ("Hello", "There")));
             send(raft, ("RAFT-UPDATE", ("Hello", "There")));
-            sleep 5000;
-            send(raft, ("SEND-TO-ALL", "debug-log"))
+            send_delay(raft, ("SEND-TO-ALL", "debug-log")) 5000
     end
 
     fun test_snapshot () =
-        let val raft = key_val_store_init_dial true
+        let val raft = key_val_store_init true
         in 
             send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
-            sleep 100;
-            send(raft, ("SEND-TO-NTH", 3, "debug-pause"));
+            send_delay(raft, ("SEND-TO-NTH", 3, "debug-pause")) 100;
             send(raft, ("RAFT-UPDATE", ("A", 1)));
-            sleep 50;
-            send(raft, ("RAFT-UPDATE", ("A", 2)));
-            sleep 50;
-            send(raft, ("RAFT-UPDATE", ("A", 4)));
-            sleep 100;
-            send(raft, ("SEND-TO-NTH", 1, "debug-applysnapshot"));
-            sleep 100;
-            send(raft, ("SEND-TO-NTH", 3, "debug-continue"));
-            sleep 500;
-            send(raft, ("SEND-TO-ALL", "debug-log"))
+            send_delay(raft, ("RAFT-UPDATE", ("A", 2))) 50;
+            send_delay(raft, ("RAFT-UPDATE", ("A", 4))) 50;
+            send_delay(raft, ("SEND-TO-NTH", 1, "debug-applysnapshot")) 100;
+            send_delay(raft, ("SEND-TO-NTH", 3, "debug-continue")) 100;
+            send_delay(raft, ("SEND-TO-ALL", "debug-log")) 500
     end
 
     fun test_lots_of_messages () = 
-        let val raft = key_val_store_init_dial true 
+        let val raft = key_val_store_init true 
         in 
             send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
             sleep 2000;
             send_n_updates raft 1000;
+            send(raft, ("SEND-TO-NTH", 1, "debug-applysnapshot"));
             sleep 5000;
             send_n_updates raft 1000;
-            sleep 1000;
-            send(raft, ("SEND-TO-ALL", "debug-log"))
+            send_delay(raft, ("SEND-TO-ALL", "debug-log")) 1000
 
     end
     
