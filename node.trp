@@ -117,10 +117,12 @@ let fun not a = a = false
                     in dic
                     end,
                 hn ("SET_SNAPSHOT", other_dic) => loop other_dic,
-                hn ("SNAPSHOT_CONDITION", (log_manifest, sender_id)) => 
-                    let val callback = log_manifest.log_size > (length dic) 
-                        andalso log_manifest.entries_since_snap > 5
-                    in send(sender_id, ("CALLBACK", callback)) end,
+                hn ("SNAPSHOT_CONDITION", (log_summary, sender_id)) => 
+                    let val callback = log_summary.log_size > (length dic) 
+                        andalso log_summary.entries_since_snap > 50
+                    in 
+                        send(sender_id, ("SNAPSHOT-CALLBACK", callback));
+                        loop dic end,
                 hn ("DROP", key) => drop key dic
             ]
             in loop dic
@@ -253,14 +255,14 @@ let fun not a = a = false
     end
 
     fun generate_summary log = 
-        {log_size = 2, entries_since_snap = 51}
+        {log_size = (length log.log), entries_since_snap = 51}
 
     fun get_snapshot_cond state_machine log = 
         let val p_id = self ()
             val summary = generate_summary log
         in 
-            send(state_machine.pid, (state_machine.snapshot_condition_hook (summary, p_id)));
-            receive [hn x => x]
+            print summary;
+            send(state_machine.pid, (state_machine.snapshot_condition_hook (summary, p_id)))
     end
 
     (* LOG FUNCTIONS END *)
@@ -353,9 +355,12 @@ let fun not a = a = false
                     voted_for = voted_for}
 
             fun apply_committed node = 
-                let val highest_commit = calc_highest_commit (map (fn x => x.match) node.leader_info.matchIndex)
+                let val prev_commit = node.log.commitIndex
+                    val highest_commit = calc_highest_commit (map (fn x => x.match) node.leader_info.matchIndex)
                     val node = { node with log = update_commit node.log highest_commit }
-                in { node with log = apply_log node.log (fn x => send (node.state_machine.pid, x)) }
+                in 
+                    if prev_commit < highest_commit then get_snapshot_cond node.state_machine node.log else ();
+                    { node with log = apply_log node.log (fn x => send (node.state_machine.pid, x)) }
                 end
 
             val _ = map (fn x => append_entries x) (filter (fn x => x <> p_id) node.all_nodes)
@@ -371,11 +376,13 @@ let fun not a = a = false
                     hn (("RAFT-UPDATE", x), dialer_id) => 
                         let val latestLogIndex = get_log_index node.log
                             val prevLogTerm = get_latest_log_term node.log
-                            val node = {node with log = append_message node.log (node.state_machine.sethook x) node.term}
-                            val node = { node with leader_info = update_match_index node.leader_info p_id (get_log_index node.log)}
-                            val node = { node with leader_info = update_next_index node.leader_info p_id ((get_log_index node.log) + 1) }
-                            val _ = verbose_print (node.id^": Appending new message to log") node.verbose
-                        in leader_node node end,
+                            val log = append_message node.log (node.state_machine.sethook x) node.term
+                            val leader_info = update_match_index node.leader_info p_id (get_log_index log)
+                            val leader_info = update_next_index leader_info p_id ((get_log_index log) + 1)
+                            val node = {node with log = log, leader_info = leader_info}
+                        in 
+                            verbose_print (node.id^": Appending new message to log") node.verbose;
+                            leader_node node end,
 
                     hn (("RAFT-GET", x), dialer_id) =>
                         let val _ = send (node.state_machine.pid, (node.state_machine.gethook x))
@@ -395,19 +402,6 @@ let fun not a = a = false
                     hn ("SEND_HEARTBEAT", x) when nonce = x =>
                         let val _ = verbose_print (node.id^": Sending heartbeat") node.verbose
                         in leader_node node end,
-                    
-                    hn ("RAFT-UPDATE", x) => 
-                        let val latestLogIndex = get_log_index node.log
-                            val prevLogTerm = get_latest_log_term node.log
-                            val node = {node with log = append_message node.log (node.state_machine.sethook x) node.term}
-                            val node = { node with leader_info = update_match_index node.leader_info p_id (get_log_index node.log)}
-                            val node = { node with leader_info = update_next_index node.leader_info p_id ((get_log_index node.log) + 1) }
-                            val _ = verbose_print (node.id^": Appending new message to log") node.verbose
-                        in loop node end,
-
-                    hn ("RAFT-GET", x) =>
-                        let val _ = send (node.state_machine.pid, (node.state_machine.gethook x))
-                        in loop node end,
 
                     hn ("RequestVote", (c_term, other_c_id, c_log_index, c_log_term, p_id)) when c_term > node.term =>
                         let val _ = send(p_id, ("YES-VOTE", node.id))
@@ -419,6 +413,15 @@ let fun not a = a = false
                         in follower (demote other_term l_id () node)
                         end,
 
+                    hn ("SNAPSHOT-CALLBACK", callback) =>
+                        case node.log.log of
+                        [] => leader_node node
+                        | _ => 
+                            if callback then                             
+                                let val log = apply_snapshot node.state_machine (get_snapshot node.state_machine node.log) node.log
+                                    in leader_node ({ node with log = log }) end
+                            else leader_node,
+
                     hn ("AppendEntries", x, l_id, other_term, prevIndex, prevTerm, commitIndex) when other_term > node.term => 
                         let val _ = verbose_print (node.id^": received AppendEntries from leader, I must have lost position") node.verbose
                         in follower (demote other_term l_id () node)
@@ -429,6 +432,7 @@ let fun not a = a = false
                             val _ = print node.log
                         val _ = print node.leader_info
                         in loop node end,
+
                     hn ("debug-pause") =>
                         let fun pause () = receive [
                             hn ("debug-continue") => loop node,
@@ -881,5 +885,5 @@ let fun not a = a = false
         in receive [hn x => print x]
     end*)
         
-in test6_local ()
+in test4_local ()
 end
