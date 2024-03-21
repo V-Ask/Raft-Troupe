@@ -2,7 +2,7 @@ let
     fun sleep_timer time done_action = 
         let val p_id = self()
 
-            fun timer timehandler_pid start_time cur_time timer_doneaction = 
+            fun timer timehandler_pid cur_time timer_doneaction = 
                 let val p_id = self()
                     val (time, reset) = 
                         sleep 95;
@@ -11,8 +11,8 @@ let
                 in 
                     print cur_time;
                     if cur_time > 1 then
-                        if reset then timer timehandler_pid time time timer_doneaction
-                        else timer timehandler_pid time (cur_time - 100) timer_doneaction
+                        if reset then timer timehandler_pid time timer_doneaction
+                        else timer timehandler_pid (cur_time - 100) timer_doneaction
                     else timer_doneaction () end
             
             fun loop (base_time, reset) =
@@ -24,7 +24,7 @@ let
                     hn ("RESET-TIMER") => (base_time, true)
                 ])
         in 
-            spawn(fn() => timer p_id time time done_action);
+            spawn(fn() => timer p_id time done_action);
             loop (time, false)
     end
     val timer_pid = spawn(fn() => sleep_timer 5000 (fn () => print "Hi!"))

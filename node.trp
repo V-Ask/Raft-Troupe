@@ -63,7 +63,7 @@ import quickselect
 
 
 let fun not a = a = false
-    fun send_to_all processes msg sender = map (fn x => send(x, msg) (filter (fn x => x <> sender) processes))
+    fun send_to_all processes msg sender = map (fn x => send(x, msg)) (filter (fn x => x <> sender) processes)
 
     fun send_to_nth processes msg n = send((nth (reverse processes) n), msg)
 
@@ -253,7 +253,15 @@ let fun not a = a = false
     end
 
     fun generate_summary log = 
-        {log_size = 0, entries_since_snap = 0}
+        {log_size = 2, entries_since_snap = 51}
+
+    fun get_snapshot_cond state_machine log = 
+        let val p_id = self ()
+            val summary = generate_summary log
+        in 
+            send(state_machine.pid, (state_machine.snapshot_condition_hook (summary, p_id)));
+            receive [hn x => x]
+    end
 
     (* LOG FUNCTIONS END *)
 
@@ -311,7 +319,7 @@ let fun not a = a = false
         in spawn timeout
     end
 
-    fun start_random_timeout func = start_timeout func (1000 + ((random ()) * 1000))
+    fun start_random_timeout func = start_timeout func (2000 + ((random ()) * 2000))
     
     fun leader_node node = 
         let val p_id = self()
@@ -338,11 +346,11 @@ let fun not a = a = false
             end
 
             fun demote term leader voted_for node = 
-                let val node = { node with term = term }
-                    val node = { node with leader = leader}
-                    val node = { node with leader_info = ()}
-                in {node with voted_for = voted_for}
-            end
+                {node with 
+                    term = term, 
+                    leader = leader,
+                    leader_info = (),
+                    voted_for = voted_for}
 
             fun apply_committed node = 
                 let val highest_commit = calc_highest_commit (map (fn x => x.match) node.leader_info.matchIndex)
@@ -432,6 +440,9 @@ let fun not a = a = false
                             val node = {node with log = apply_snapshot node.state_machine snapshot node.log}
                             val _ = verbose_print (node.id^": applying snapshot") node.verbose
                         in loop node end,
+
+                    hn ("debug-snapshotcond") =>
+                        print (get_snapshot_cond node.state_machine node.log),
                     hn ("print-entries") =>
                         let val _ = print node.id
                             val _ = print node.log.entries
@@ -805,6 +816,14 @@ let fun not a = a = false
             send_delay(raft, ("SEND-TO-ALL", "debug-log")) 5000
     end
 
+    fun test5_local () =
+        let val raft = key_val_store_init true
+        in
+            send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
+            send_n_updates raft 5;
+            send(raft, ("SEND-TO-NTH", 1, "debug-snapshotcond"))
+    end
+
     fun test_snapshot () =
         let val raft = key_val_store_init true
         in 
@@ -848,5 +867,5 @@ let fun not a = a = false
         in receive [hn x => print x]
     end*)
         
-in key_val_store_init true
+in test5_local ()
 end
