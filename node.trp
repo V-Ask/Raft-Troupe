@@ -34,11 +34,13 @@ import quickselect
 
 (*
     StateMachine = {
-        set_hook: string,
-        get_hook: string,
-        snapshothook: fn a, b => ... return true they should be merged, false otherwise
+        set_hook : fn (x: string) => x: string
+        get_hook : fn (x: string, callback_pid: string) => x: string
+        set_snapshot_hook: fn (x: string) => x: string
+        get_snapshot_hook : fn (callback_pid: string)  => x: string
+        snapshot_condition_hook : fn (log_summary: LogSummary, callback_pid: string) => x: bool
     }
-    LogManifest = {
+    LogSummary = {
         log_size: int,
         entries_since_snap: int
     }
@@ -61,7 +63,7 @@ import quickselect
 
 
 let fun not a = a = false
-    fun send_to_all processes msg sender = map (fn x => send(x, msg)) (filter (fn x => x <> sender) processes)
+    fun send_to_all processes msg sender = map (fn x => send(x, msg) (filter (fn x => x <> sender) processes))
 
     fun send_to_nth processes msg n = send((nth (reverse processes) n), msg)
 
@@ -73,19 +75,68 @@ let fun not a = a = false
 
     fun min a b = if a > b then b else a
 
+    (* KEY VALUE FUNCTIONS BEGIN *)
+
+    fun key_val_store () = 
+        let fun remove element list = 
+            case list of 
+            [] => []
+            | h :: t => 
+                if h = element then t
+                else append [h] (remove element t)
+        fun get_record key dic =
+            case dic of
+                [] => ()
+                | h :: t => 
+                    if h.key = key then h
+                    else get_record key t
+        fun get key dic = 
+            let val record = get_record key dic
+            in if record = () then ()
+                else record.value
+            end
+        fun set (key, value) dic = 
+            let val existing_record = get_record key dic 
+                val new_record = {key = key, value = value}
+            in if existing_record = () then 
+                append [{key = key, value = value}] dic
+            else 
+                if new_record = existing_record then dic
+                else append [new_record] (remove existing_record dic)
+            end
+        fun drop key dic = 
+            remove (get_record key dic) dic
+        val dic = []
+        fun loop dic = 
+            let val dic = receive [
+                hn ("SET", (key, value)) => set (key, value) dic,
+                hn ("GET", (key, sender_id)) => 
+                    let val _ = send(sender_id, ("RESPONSE", (get key dic)))
+                    in dic
+                    end,
+                hn ("GET_SNAPSHOT", sender_id) => 
+                    let val _ = send(sender_id, ("SNAPSHOT", dic))
+                    in dic
+                    end,
+                hn ("SET_SNAPSHOT", other_dic) => loop other_dic,
+                hn ("SNAPSHOT_CONDITION", (log_manifest, sender_id)) => 
+                    let val callback = log_manifest.log_size > (length dic) 
+                        andalso log_manifest.entries_since_snap > 5
+                    in send(sender_id, ("CALLBACK", callback)) end,
+                hn ("DROP", key) => drop key dic
+            ]
+            in loop dic
+            end
+        in loop dic
+    end
+    (* KEY VALUE FUNCTIONS END*)
+
     fun set_snapshot snapshot index term =
     {
         snapshot = snapshot,
         lastIncludedIndex = index,
         lastIncludedTerm = term
     }
-
-    fun take_snapshot state_machine index term = 
-        let val pid = self()
-            val _ = send (state_machine.pid, (state_machine.snapshot_gethook pid))
-            val state = receive[hn ("SNAPSHOT", x) => x]
-        in set_snapshot state index term
-    end
 
     val empty_snapshot = set_snapshot () 0 0
 
@@ -174,10 +225,18 @@ let fun not a = a = false
             in apply_log log f end
         else log
     
+    fun take_snapshot state_machine index term = 
+        let val pid = self()
+            val _ = send (state_machine.pid, (state_machine.snapshot_gethook pid))
+            val state = receive[hn ("SNAPSHOT", x) => x]
+        in set_snapshot state index term
+    end
+
     fun get_snapshot state_machine log = 
         let val lastCommitted = get_nth_command log log.commitIndex
         in take_snapshot state_machine log.commitIndex lastCommitted.term
     end
+
 
     fun apply_snapshot state_machine snapshot log =
         let val _ = send(state_machine.pid, snapshot.snapshot)
@@ -188,11 +247,16 @@ let fun not a = a = false
             val newLastApplied =
                 if log.lastApplied < snapshot.lastIncludedIndex then snapshot.lastIncludedIndex
                 else log.lastApplied
-            val log = {log with log = uncommitted_entries}
-            val log = {log with commitIndex = newCommitIndex}
-            val log = {log with lastApplied = newLastApplied}
-        in { log with snapshot = snapshot }
+        in { log with 
+                log = uncommitted_entries,
+                commitIndex = newCommitIndex,
+                lastApplied = newLastApplied,
+                snapshot = snapshot }
     end
+
+    fun generate_summary log = 
+        {log_size = 0, entries_since_snap = 0}
+
     (* LOG FUNCTIONS END *)
 
 
@@ -236,62 +300,6 @@ let fun not a = a = false
     fun calc_highest_commit matches = median matches
 
     (* LEADERINFO FUNCTIONS END*)
-
-    (* KEY VALUE FUNCTIONS BEGIN *)
-
-    fun key_val_store () = 
-        let fun remove element list = 
-            case list of 
-            [] => []
-            | h :: t => 
-                if h = element then t
-                else append [h] (remove element t)
-        fun get_record key dic =
-            case dic of
-                [] => ()
-                | h :: t => 
-                    if h.key = key then h
-                    else get_record key t
-        fun get key dic = 
-            let val record = get_record key dic
-            in if record = () then ()
-                else record.value
-            end
-        fun set (key, value) dic = 
-            let val existing_record = get_record key dic 
-                val new_record = {key = key, value = value}
-            in if existing_record = () then 
-                append [{key = key, value = value}] dic
-            else 
-                if new_record = existing_record then dic
-                else append [new_record] (remove existing_record dic)
-            end
-        fun drop key dic = 
-            remove (get_record key dic) dic
-        val dic = []
-        fun loop dic = 
-            let val dic = receive [
-                hn ("SET", (key, value)) => set (key, value) dic,
-                hn ("GET", (key, sender_id)) => 
-                    let val _ = send(sender_id, ("RESPONSE", (get key dic)))
-                    in dic
-                    end,
-                hn ("GET_SNAPSHOT", sender_id) => 
-                    let val _ = send(sender_id, ("SNAPSHOT", dic))
-                    in dic
-                    end,
-                hn ("SET_SNAPSHOT", other_dic) => loop other_dic,
-                hn ("SNAPSHOT?", (log_manifest, sender_id)) => 
-                    let val callback = log_manifest.log_size > (length dic) 
-                        andalso log_manifest.entries_since_snap > 50
-                    in send(sender_id, ("CALLBACK", callback)) end,
-                hn ("DROP", key) => drop key dic
-            ]
-            in loop dic
-            end
-        in loop dic
-    end
-    (* KEY VALUE FUNCTIONS END*)
 
     fun verbose_print x verbose = if verbose then print x else ()
 
@@ -426,7 +434,7 @@ let fun not a = a = false
                             val node = {node with log = apply_snapshot node.state_machine snapshot node.log}
                             val _ = verbose_print (node.id^": applying snapshot") node.verbose
                         in loop node end,
-                        hn ("print-entries") =>
+                    hn ("print-entries") =>
                         let val _ = print node.id
                             val _ = print node.log.entries
                             val _ = print node.log.snapshot.snapshot
@@ -614,7 +622,8 @@ let fun not a = a = false
                     ]
                     in loop () end,
                 hn ("debug-timeout") => start_election (),
-                hn _ => loop node
+                hn _ => 
+                    loop node
             ]
             in loop node
         end
@@ -636,28 +645,30 @@ let fun not a = a = false
         in fn() => follower node
     end
 
-    fun initiate_node all_nodes id state_machine sethook gethook snapshot_gethook snapshot_sethook verbose = 
+    fun initiate_node all_nodes id state_machine sethook gethook snapshot_gethook snapshot_sethook snapshot_condition_hook verbose = 
         let val state_machine_pid = spawn state_machine 
             val state_machine_record = 
                 {pid = state_machine_pid, 
                 sethook = sethook, 
                 gethook = gethook, 
                 snapshot_gethook = snapshot_gethook,
-                snapshot_sethook = snapshot_sethook}
+                snapshot_sethook = snapshot_sethook,
+                snapshot_condition_hook = snapshot_condition_hook}
         in spawn (default_node all_nodes id state_machine_record verbose)
     end
+
     fun initiate_distributed_node all_nodes id alias state_machine = 
         let val state_machine_pid = spawn(alias, state_machine)
         in spawn(alias, (default_node all_nodes id state_machine_pid))
     end
     
-    fun initiate_nodes n state_machine sethook gethook snapshot_gethook snapshot_sethook verbose =
+    fun initiate_nodes n state_machine sethook gethook snapshot_gethook snapshot_sethook snapshot_condition_hook verbose =
         let fun get_nodes n acc_id =
                 case n of
                 0 => []
                 | x => append 
                     (get_nodes (x - 1) (acc_id ^ "I")) 
-                    [(initiate_node [] acc_id state_machine sethook gethook snapshot_gethook snapshot_sethook verbose)]
+                    [(initiate_node [] acc_id state_machine sethook gethook snapshot_gethook snapshot_sethook snapshot_condition_hook verbose)]
             
             fun add_refs nodes = 
                 let fun loop remaining = 
@@ -723,8 +734,8 @@ let fun not a = a = false
         in loop leader
     end
 
-    fun raft state_machine_func set_hook get_hook get_snapshot_hook set_snapshot_hook verbose =
-        let val nodes = initiate_nodes 5 state_machine_func set_hook get_hook get_snapshot_hook set_snapshot_hook verbose
+    fun raft state_machine_func set_hook get_hook get_snapshot_hook set_snapshot_hook snapshot_condition_hook verbose =
+        let val nodes = initiate_nodes 5 state_machine_func set_hook get_hook get_snapshot_hook set_snapshot_hook snapshot_condition_hook verbose
             val dialer = (fn () => dialer nodes)
         in spawn dialer
     end
@@ -735,7 +746,7 @@ let fun not a = a = false
             (fn (x, callback_pid) => ("GET", (x, callback_pid)))
             (fn (callback_pid) => ("GET_SNAPSHOT", callback_pid))
             (fn x => ("SET_SNAPSHOT", x))
-            (fn (log_manifest, callback_pid) => ("SNAPSHOT?", (log_manifest, callback_pid)))
+            (fn (log_summary, callback_pid) => ("SNAPSHOT_CONDITION", (log_summary, callback_pid)))
             verbose
 
     fun send_delay (to, m) delay =
@@ -839,5 +850,5 @@ let fun not a = a = false
         in receive [hn x => print x]
     end*)
         
-in test_lots_of_messages ()
+in key_val_store_init true
 end
