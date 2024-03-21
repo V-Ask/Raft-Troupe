@@ -67,7 +67,9 @@ let fun not a = a = false
 
     fun send_to_nth processes msg n = send((nth (reverse processes) n), msg)
 
-    (* #IMPORT log.trp *)
+    (*
+        LOG FUNCTIONS BEGIN
+    *)
 
     fun max a b = if a < b then b else a 
 
