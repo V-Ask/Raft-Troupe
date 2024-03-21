@@ -1,67 +1,35 @@
-(*
-    LeaderInfo = {
-        nextIndex = {
-            peer: p,
-            next: int
-        }[],
-        matchIndex = {
-            peer: p,
-            match: int
-        }[]
-    }
-*)
+    fun new_leader all_nodes log = 
+        let val nextIndex = get_log_index log
+            val index = map (fn id => {peer = id, next = nextIndex + 1}) all_nodes
+            val match_index = map (fn id => {peer = id, match = 0}) all_nodes
+        in {
+            nextIndex = index,
+            matchIndex = match_index
+        } end
+    
+    fun get_next_index leader_info peer = first (filter (fn (x) => x.peer = peer) leader_info.nextIndex)
+
+    fun get_match_index leader_info peer = first (filter (fn (x) => x.peer = peer) leader_info.matchIndex)
+
+    fun update_next_index leader_info peer new = let
+        val prevIndex = get_next_index leader_info peer
+        val newIndex = {peer = peer, next = new}
+        val witoutPeer = filter (fn (x) => x.peer <> peer) leader_info.nextIndex
+    in {
+        leader_info with 
+        nextIndex = newIndex :: witoutPeer
+    } end
+
+    fun update_match_index leader_info peer new = let
+        val prevIndex = get_match_index leader_info peer
+        val newIndex = {peer = peer, match = new}
+        val witoutPeer = filter (fn (x) => x.peer <> peer) leader_info.matchIndex
+    in {
+        leader_info with 
+        matchIndex = newIndex :: witoutPeer
+    } end
 
 
+    fun get_matches leader_info = map (fn x => x.match) leader_info.matchIndex
 
-fun filter f l = case l of
-[] => []
-| h :: t => if f h then h :: (filter f t) else filter f t
-
-fun first l = case l of
-[] => []
-| h :: _ => h
-
-
-fun new_leader all_nodes next_index = let 
-    val index = map (fn id => {peer = id, next = next_index}) all_nodes
-    val match_index = map (fn id => {peer = id, match = 0}) all_nodes
-in {
-    nextIndex = index,
-    matchIndex = match_index
-} end
-
-fun get_next_index leader_info peer = first (filter (fn (x) => x.peer = peer) leader_info.nextIndex)
-
-fun get_match_index leader_info peer = first (filter (fn (x) => x.peer = peer) leader_info.matchIndex)
-
-fun update_next_index leader_info peer new = let
-    val prevIndex = get_next_index leader_info peer
-    val newIndex = {peer = peer, next = new}
-    val witoutPeer = filter (fn (x) => x.peer <> peer) leader_info.nextIndex
-in {
-    leader_info with 
-    nextIndex = newIndex :: witoutPeer
-} end
-
-fun update_match_index leader_info peer new = let
-    val prevIndex = get_match_index leader_info peer
-    val newIndex = {peer = peer, next = new}
-    val witoutPeer = filter (fn (x) => x.peer <> peer) leader_info.matchIndex
-in {
-    leader_info with 
-    matchIndex = newIndex :: witoutPeer
-} end
-
-fun get_newcommit matches acc = foldl (fn (x, acc) => 
-    case (filter (fn y => y.value = x) acc) of 
-    [] => {value=x,amount=1} :: acc 
-    | h :: _ => {h with amount = (h.amount + 1)} :: (filter (fn y => y.value <> x) acc)) acc matches
-
-fun calc_highest_commit_helper matches acc = case matches of 
-    [] => acc
-    | _ => calc_highest_commit_helper (filter (fn x => x > 0) (map (fn x => x - 1) matches)) ((get_newcommit matches acc))
-
-fun calc_highest_commit matches = foldl 
-    (fn (x, acc) => if x.value > acc.value then x else acc) {value=-1} 
-    (filter (fn x => x.amount >= (length matches) / 2) (calc_highest_commit_helper matches []))
-
+    fun calc_highest_commit matches = median matches

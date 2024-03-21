@@ -1,67 +1,54 @@
-import lists
-let fun dic_manager () = 
-    let fun remove element list = 
-        case list of 
-        [] => []
-        | h :: t => 
-            if h = element then t
-            else append [h] (remove element t)
-    fun get_record key dic =
-        case dic of
-            [] => ()
+    fun key_val_store () = 
+        let fun remove element list = 
+            case list of 
+            [] => []
             | h :: t => 
-                if h.key = key then h
-                else get_record key t
-    fun get key dic = 
-        let val record = get_record key dic
-        in if record = () then ()
-            else record.value
-        end
-    fun set (key, value) dic = 
-        let val existing_record = get_record key dic 
-            val new_record = {key = key, value = value}
-        in if existing_record = () then 
-            append [{key = key, value = value}] dic
-        else 
-            if new_record = existing_record then dic
-            else append [new_record] (remove existing_record dic)
-        end
-    fun drop key dic = 
-        remove (get_record key dic) dic
-    val dic = []
-    fun loop dic = 
-        let val dic = receive [
-            hn ("SET", (key, value)) => set (key, value) dic,
-            hn ("GET", (key, sender_id)) => 
-                let val _ = send(sender_id, ("RESPONSE", (get key dic)))
-                in dic
-                end,
-            hn ("GET_SNAPSHOT", sender_id) => send(sender_id, ("SNAPSHOT", dic)),
-            hn ("SET_SNAPSHOT", other_dic) => loop other_dic,
-            hn ("DROP", key) => drop key dic
-        ]
+                if h = element then t
+                else append [h] (remove element t)
+        fun get_record key dic =
+            case dic of
+                [] => ()
+                | h :: t => 
+                    if h.key = key then h
+                    else get_record key t
+        fun get key dic = 
+            let val record = get_record key dic
+            in if record = () then ()
+                else record.value
+            end
+        fun set (key, value) dic = 
+            let val existing_record = get_record key dic 
+                val new_record = {key = key, value = value}
+            in if existing_record = () then 
+                append [{key = key, value = value}] dic
+            else 
+                if new_record = existing_record then dic
+                else append [new_record] (remove existing_record dic)
+            end
+        fun drop key dic = 
+            remove (get_record key dic) dic
+        val dic = []
+        fun loop dic = 
+            let val dic = receive [
+                hn ("SET", (key, value)) => set (key, value) dic,
+                hn ("GET", (key, sender_id)) => 
+                    let val _ = send(sender_id, ("RESPONSE", (get key dic)))
+                    in dic
+                    end,
+                hn ("GET_SNAPSHOT", sender_id) => 
+                    let val _ = send(sender_id, ("SNAPSHOT", dic))
+                    in dic
+                    end,
+                hn ("SET_SNAPSHOT", other_dic) => loop other_dic,
+                hn ("SNAPSHOT_CONDITION", (log_summary, sender_id)) => 
+                    let val callback = log_summary.log_size > (length dic) 
+                        andalso log_summary.entries_since_snap > 50
+                    in 
+                        send(sender_id, ("SNAPSHOT-CALLBACK", callback));
+                        loop dic end,
+                hn ("DROP", key) => drop key dic
+            ]
+            in loop dic
+            end
         in loop dic
-        end
-    in loop dic
     end
-    fun execute_and_receive func response_prefix =
-    let val _ = func ()
-    in receive [
-        hn (response_prefix, x) => x
-    ]
-    end
-    
-    fun get_entry key dic_pid = 
-    let val p_id = self()
-        val func = (fn () => send(dic_pid, ("GET", key, p_id)))
-    in execute_and_receive func "RESPONSE"
-    end
-
-    fun set_entry key value dic_pid = send(dic_pid, ("SET", key, value))
-
-    val dic_pid = spawn dic_manager
-    val _ = set_entry "hello, world" 1000 dic_pid
-    val _ = set_entry "hello, world" 42 dic_pid
-    val response = get_entry "hello, world" dic_pid 
-in print response
-end
