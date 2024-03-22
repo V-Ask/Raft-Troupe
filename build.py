@@ -1,4 +1,5 @@
-#! /bin/python3.11
+#!/usr/bin/env python
+
 import re
 import sys
 

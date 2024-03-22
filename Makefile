@@ -9,7 +9,7 @@ run: build/node_dest.trp
 	$(LOCAL) ./build/node_dest.trp
 
 build/node_dest.trp: node.trp libs/log.trp libs/leader-info.trp libs/key-val.trp
-	./build.py node.trp
+	python build.py node.trp
 
 zero.listener1:
 	$(START) zero.trp --id=ids/node1.json --rspawn=true --aliases=aliases.json --stdiolev={} # --debug --debugp2p

@@ -1,3 +1,4 @@
+    (* EXPORT START *)
     fun set_snapshot snapshot index term = {
         snapshot = snapshot,
         lastIncludedIndex = index,
@@ -10,23 +11,27 @@
         log = [],
         snapshot = empty_snapshot,
         lastApplied = 0,
-        commitIndex = 0
+        commitIndex = 0,
+        lastMessageSerial = ""
     }
 
     fun empty_log_with_snap snapshot = {
         log = [],
         snapshot = snapshot,
         lastApplied = 0,
-        commitIndex = 0
+        commitIndex = 0,
+        lastMessageSerial = ""
     }
 
-    fun append_message log message term = 
+    fun append_message log message term serial = 
         let val new_entry = {
             term = term,
-            command = message
+            command = message,
+            serial = serial
         }
         in {
-            log with 
+            log with
+            lastMessageSerial = serial, 
             log = new_entry :: log.log
         } 
     end
@@ -34,7 +39,8 @@
     fun add_entries_to_log log entries term =
         case entries of
         [] => log
-        | h :: t => add_entries_to_log (append_message log h.command term) t h.term
+        | h :: t => 
+            add_entries_to_log (append_message log h.command term) t h.term h.serial
 
     fun update_applied log = {
         log with
@@ -126,7 +132,6 @@
     fun get_snapshot_cond state_machine log = 
         let val p_id = self ()
             val summary = generate_summary log
-        in 
-            print summary;
-            send(state_machine.pid, (state_machine.snapshot_condition_hook (summary, p_id)))
+        in send(state_machine.pid, (state_machine.snapshot_condition_hook (summary, p_id)))
     end
+    (* EXPORT END *)

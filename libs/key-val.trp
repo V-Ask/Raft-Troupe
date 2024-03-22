@@ -1,3 +1,4 @@
+    (* EXPORT START *)
     fun key_val_store () = 
         let fun remove element list = 
             case list of 
@@ -52,3 +53,4 @@
             end
         in loop dic
     end
+    (* EXPORT END *)
