@@ -1,5 +1,8 @@
+import lists
+
 let 
-    (* EXPORT START *)
+
+  (* #IMPORT leader-info.trp *)
     fun new_leader all_nodes log = 
         let val nextIndex = get_log_index log
             val index = map (fn id => {peer = id, next = nextIndex + 1}) all_nodes
@@ -35,5 +38,6 @@ let
     fun get_matches leader_info = map (fn x => x.match) leader_info.matchIndex
 
     fun calc_highest_commit matches = median matches
-    (* EXPORT END *)
+    (* END OF leader-info.trp *)
+
 in () end

@@ -19,9 +19,14 @@ for line in src.readlines():
 
     with open(match.group(0), 'r') as f:
         print("Importing: " + match.group(0))
-        for li in f.readlines():
-            dest.write(li)
-
+        exportgroup = re.search(
+            '(\(\* ?EXPORT START ?\*\)\n)((.|\n)*)(\(\* ?EXPORT END ?\*\))', f.read())
+        if exportgroup is None:
+            for li in f.readlines():
+                dest.write(li)
+        else:
+            for li in exportgroup.group(2):
+                dest.write(li)
     dest.write("(* END OF " + match.group(0) + " *)\n")
 
 src.close()
