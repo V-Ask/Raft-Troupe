@@ -71,11 +71,11 @@ let fun not a = a = false
 
     fun min a b = if a > b then b else a
 
-    (* #IMPORT log.trp *)
+    (* #IMPORT libs/log.trp *)
 
-    (* #IMPORT key-val.trp *)
+    (* #IMPORT libs/key-val.trp *)
 
-    (* #IMPORT leader-info.trp *)
+    (* #IMPORT libs/leader-info.trp *)
 
     fun verbose_print x verbose = if verbose then print x else ()
 

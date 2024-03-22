@@ -8,7 +8,7 @@ LOCAL=$(TROUPE)/local.sh
 run: build/node_dest.trp
 	$(LOCAL) ./build/node_dest.trp
 
-build/node_dest.trp: node.trp leader-info.trp key-val.trp
+build/node_dest.trp: node.trp libs/log.trp libs/leader-info.trp libs/key-val.trp
 	./build.py node.trp
 
 zero.listener1:
