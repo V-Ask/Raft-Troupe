@@ -774,7 +774,8 @@ let fun not a = a = false
             (fn x => ("SET_SNAPSHOT", x))
             (fn (log_summary, callback_pid) => ("SNAPSHOT_CONDITION", (log_summary, callback_pid)))
             verbose
-
+    
+    (* #IMPORT libs/tests.trp *)
     fun send_delay (to, m) delay =
         sleep delay;
         send (to, m)
@@ -890,23 +891,7 @@ let fun not a = a = false
             send_n_unique_message raft 5;
             send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 1000
     end
-    
-    (*fun initiate_3_distributed_nodes () =
-        let 
-            val node1 = initiate_distributed_node [] "1" "@node1" key_val_store
-            val node2 = initiate_distributed_node [node1] "2" "@node2" key_val_store
-            val node3 = initiate_distributed_node [node2, node1] "3" "@node3" key_val_store
-            val all_nodes = [node1, node2, node3]
-            val _ = send(node1, ("ADD_NODES", [node2, node3]))
-            val _ = send(node2, ("ADD_NODES", [node3]))
-            val _ = sleep 2000
-            val _ = send_to_all all_nodes ("RAFT-UPDATE", ("Victor", "Gruppemedlem 1")) (self())
-            val _ = sleep 2000
-            val _ = send_to_all all_nodes ("RAFT-UPDATE", ("Victor", "Gruppemedlem 2")) (self())
-            val _ = sleep 2000
-            val _ = send_to_all all_nodes ("debug-printlog") (self())
-        in receive [hn x => print x]
-    end*)
-        
+    (* END OF libs/tests.trp *)
+
 in test3_local ()
 end

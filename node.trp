@@ -82,6 +82,7 @@ let fun not a = a = false
 
     fun verbose_print x verbose = if verbose then print x else ()
 
+    (* Executes a function after a given timeout *)
     fun start_timeout func duration = 
         let fun timeout () = 
             let val time = duration
@@ -92,10 +93,12 @@ let fun not a = a = false
         in spawn timeout
     end
 
+    (* Starts a random timeout with lower=1sec and upper=2sec *)
     fun start_random_timeout func = start_timeout func (1000 + ((random ()) * 1000))
     
     fun leader_node node = 
         let val p_id = self()
+            (* Appends appends all entries from a follower's nextIndex to the leader's log index*)
             fun append_entries follower_pid =
                     let val nextIndex = get_next_index node.leader_info follower_pid
                     val logIndex = get_log_index node.log
@@ -103,11 +106,11 @@ let fun not a = a = false
                     let 
                         val latestLogIndex = nextIndex.next - 1
                     in 
+                        (* Sends the snapshot if the followers nextIndex is before the Snapshot's lastIncludedIndex *)
                         if nextIndex.next <= node.log.snapshot.lastIncludedIndex 
                             then send(follower_pid, ("Snapshot", node.log.snapshot, p_id, node.term))
                         else 
-                            let 
-                                val entries = get_commands_after_nth node.log latestLogIndex
+                            let val entries = get_commands_after_nth node.log latestLogIndex
                                 val afterSnapshot = latestLogIndex - node.log.snapshot.lastIncludedIndex
                                 val prevEntryTerm = 
                                     if afterSnapshot > 0 then (get_nth_command node.log latestLogIndex).term 
@@ -115,9 +118,11 @@ let fun not a = a = false
                             in send(follower_pid, ("AppendEntries", entries, p_id, node.term, latestLogIndex, prevEntryTerm, node.log.commitIndex))
                         end
                 end
+                (* A follower should never get more entries than the leader *)
                 else print "ERROR"
             end
 
+            (* Convert leader to follower *)
             fun demote term leader voted_for node = 
                 {node with 
                     term = term, 
@@ -125,6 +130,7 @@ let fun not a = a = false
                     leader_info = (),
                     voted_for = voted_for}
 
+            (* Applies all committed nodes that have not already been applied *)
             fun apply_committed node = 
                 let val prev_commit = node.log.commitIndex
                     val highest_commit = calc_highest_commit (map (fn x => x.match) node.leader_info.matchIndex)
@@ -136,9 +142,11 @@ let fun not a = a = false
                     { node with log = applied_log }
                 end
 
+            (* Append entries for each follower *)
             val _ = map (fn x => append_entries x) (filter (fn x => x <> p_id) node.all_nodes)
             val nonce = mkuuid ()
             val _ = start_timeout (fn () => send (p_id, ("SEND_HEARTBEAT", nonce))) 500
+
             fun loop node = 
                 let val node = apply_committed node
                 val _ = receive [
@@ -146,10 +154,12 @@ let fun not a = a = false
                         let val _ = verbose_print (node.id^": Sending heartbeat") node.verbose
                         in leader_node node end,
 
+                    (* Message has already been received and appended *)
                     hn (("RAFT-UPDATE", x), dialer_id, serial_n) when serial_n = node.log.lastMessageSerial =>
                         send(dialer_id, "DIALER-ACK");
                         leader_node node,
 
+                    (* Message has not been appended before *)
                     hn (("RAFT-UPDATE", x), dialer_id, serial_n) => 
                         let val latestLogIndex = get_log_index node.log
                             val prevLogTerm = get_latest_log_term node.log
@@ -167,11 +177,13 @@ let fun not a = a = false
                         send(dialer_id, "DIALER-ACK");
                         loop node,
 
-                    hn ("ACKNOWLEGDE", (peer, logIndex)) => (*Dette er hvis append er en success*)
+                    (* If append is successful on a follower*)
+                    hn ("ACKNOWLEGDE", (peer, logIndex)) => 
                         let val node = { node with leader_info = update_match_index node.leader_info peer logIndex }
                             val node = { node with leader_info = update_next_index node.leader_info peer (logIndex + 1) }
                         in loop node end,
                     
+                    (* If append is unsuccessful *)
                     hn ("REJECT", (peer, terminfo, logIndex)) => 
                         if node.term >= terminfo.term then 
                             let val node = { node with leader_info = update_next_index node.leader_info peer ((min (get_log_index node.log) (logIndex)) + 1) } 
@@ -179,21 +191,22 @@ let fun not a = a = false
                             end
                         else follower (demote terminfo.term terminfo.leader ()
                         node),
-                        
-                    hn ("SEND_HEARTBEAT", x) when nonce = x =>
-                        let val _ = verbose_print (node.id^": Sending heartbeat") node.verbose
-                        in leader_node node end,
 
+                    (* If another node has been elected as a candidate, and
+                        their term is in front of ours, convert to a follower *)
                     hn ("RequestVote", (c_term, other_c_id, c_log_index, c_log_term, p_id)) when c_term > node.term =>
                         let val _ = send(p_id, ("YES-VOTE", node.id))
                         in follower (demote c_term () other_c_id node)
                         end,
 
+                    (* If we receive snapshot from a leader in a higher term,
+                    convert to follower *)
                     hn ("Snapshot", snapshot, l_id, other_term) when other_term > node.term =>
                         let val _ = verbose_print (node.id^": received Snapshot from leader, I must have lost position") node.verbose
                         in follower (demote other_term l_id () node)
                         end,
 
+                    (* State-machine replies whether or not to snapshot *)
                     hn ("SNAPSHOT-CALLBACK", callback) =>
                         case node.log.log of
                         [] => leader_node node
@@ -202,30 +215,37 @@ let fun not a = a = false
                                 let val log = apply_snapshot node.state_machine (get_snapshot node.state_machine node.log) node.log
                                     in leader_node ({ node with log = log }) end
                             else leader_node node,
-
+                    
+                    (* If we receive AppendEntries from a leader in a higher term,
+                    convert to follower *)
                     hn ("AppendEntries", x, l_id, other_term, prevIndex, prevTerm, commitIndex) when other_term > node.term => 
                         let val _ = verbose_print (node.id^": received AppendEntries from leader, I must have lost position") node.verbose
                         in follower (demote other_term l_id () node)
                         end,
-                        
+                    
+                    (* Prints log *)
                     hn ("debug-printlog") =>
                         print node.id;
                         print node.log;
                         print node.leader_info;
                         loop node,
 
+                    (* Halts the leader *)
                     hn ("debug-pause") =>
                         let fun pause () = receive [
                             hn ("debug-continue") => loop node,
                             hn x => pause ()
                         ]
                         in pause () end,
+
+                    (* Applies a snapshot *)
                     hn ("debug-applysnapshot") =>
                         let val snapshot = get_snapshot node.state_machine node.log
                             val node = {node with log = apply_snapshot node.state_machine snapshot node.log}
                             val _ = verbose_print (node.id^": applying snapshot") node.verbose
                         in loop node end,
 
+                    (* Asks the state-machine for the snapshot condition *)
                     hn ("debug-snapshotcond") =>
                         print (get_snapshot_cond node.state_machine node.log);
                         loop node,
@@ -238,12 +258,18 @@ let fun not a = a = false
 
     and candidate node =
         let val p_id = self()
+
+            (* A candidate cannot vote for anyone and has no leader *)
             val node = {node with voted_for = (), leader = ()}
             val nonce = mkuuid()
             val _ = verbose_print (node.id^": I am now a candidate") node.verbose
+
+            (* Sends a vote request to all followers *)
             val latestLogIndex = get_log_index node.log
             val prevLogTerm = get_latest_log_term node.log
             val _ = send_to_all node.all_nodes ("RequestVote", (node.term, node.id, latestLogIndex, prevLogTerm, p_id)) (p_id)
+
+            (* Becoming a leader requires majority vote *)
             val req_votes = ((length node.all_nodes) / 2)
             fun won_election () = 
                 let val _ = verbose_print (node.id^": I won the election") node.verbose
@@ -257,24 +283,36 @@ let fun not a = a = false
                 let 
                     fun loop () = receive [
                     hn ("JOIN_CLUSTER", p_id) => send(p_id, ("NOT_LEADER", ())),
+
+                    (* Received a vote from a follower we have not already
+                    received a vote from *)
                     hn ("YES-VOTE", follower_id) when (not (contains follower_id follower_votes)) => 
                         wait_for_votes ((append follower_votes [follower_id]), vote_amount + 1),
 
+                    (*We received a no-vote from a follower in a later term.
+                    This can only happen if there is a leader/candidate in this
+                    term, and as such, we convert to a follower *)
                     hn ("NO-VOTE", other_term) when other_term > node.term =>
                         follower node,
 
+                    (* Received vote request from leader in later term *)
                     hn ("RequestVote", (c_term, other_c_id, c_log_index, c_log_term, p_id)) when c_term > node.term =>
                         let val _ = send(p_id, ("YES-VOTE", node.id))
                         in follower ({ node with term = c_term, voted_for = other_c_id})
                         end,
                     
+                    (* Received message from leader in a term at least as
+                    up-to-date as ours. Because of this, we must have lost the
+                    election *)
                     hn ("AppendEntries", x, l_id, other_term, prevIndex, prevTerm, commitIndex) when other_term >= node.term => 
                         let val _ = verbose_print (node.id^": received AppendEntries from leader, I must have lost position") node.verbose
                         in follower ({ node with leader = l_id})
                         end,
 
+                    (* Election timeout, send out another request vote *)
                     hn ("VOTE-TIMEOUT", x) when x = nonce => candidate {node with term = node.term + 1},
 
+                    (* Halts the candidate *)
                     hn ("debug-pause") =>
                         let fun loop () = receive [
                             hn ("debug-continue") => (),
@@ -547,139 +585,8 @@ let fun not a = a = false
             (fn x => ("SET_SNAPSHOT", x))
             (fn (log_summary, callback_pid) => ("SNAPSHOT_CONDITION", (log_summary, callback_pid)))
             verbose
-
-    fun send_delay (to, m) delay =
-        sleep delay;
-        send (to, m)
-
-    fun send_n_updates raft n =
-        let fun loop n =
-            send(raft, ("RAFT-UPDATE", ("TEST", "TEST")));
-            print n;
-            sleep 10;
-            if n > 1 then loop (n - 1) else () 
-        in loop n 
-    end
-
-    fun send_n_unique_message raft n =
-        let fun loop n =
-            send(raft, ("RAFT-UPDATE", (mkuuid(), "TEST")));
-            print n;
-            sleep 10;
-            if n > 1 then loop (n - 1) else ()
-        in loop n
-    end
-
-
-    fun test_local1 () = 
-        let val raft = key_val_store_init true
-        in
-            send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
-            send_delay(raft, ("RAFT-UPDATE", ("Hello", "There"))) 500;
-            send_delay(raft, ("SEND-TO-NTH", 1, "debug-pause")) 1000;
-            print "killing I";
-            send_delay(raft, ("RAFT-UPDATE", ("Hello", "World"))) 500;
-            send_delay(raft, ("SEND-TO-NTH", 1, "debug-continue")) 8000;
-            print "reviving I";
-            send(raft, ("SEND-TO-NTH", 1, ("RAFT-UPDATE", ("Hello", "Other World"))));
-            send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 2000
-    end
-
-    fun test2_local () = 
-        let val raft = key_val_store_init true
-        in 
-            send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
-            send(raft, ("SEND-TO-NTH", 2, "debug-timeout"));
-            send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 1000
-    end
-
-    fun test3_local () = 
-        let val p_id = self()
-            val raft = key_val_store_init true
-        in 
-            send_delay(raft, ("RAFT-UPDATE", ("A", 42))) 2000;
-            send_delay(raft, ("RAFT-GET", ("A", p_id))) 1000;
-            receive [hn x => print x]
-    end
-
-    fun test4_local () = 
-        let val raft = key_val_store_init true
-        in
-            send_delay(raft, ("RAFT-UPDATE", ("Hello", "There"))) 2000;
-            send_delay(raft, ("RAFT-UPDATE", ("Hello", "There"))) 1000;
-            send_delay(raft, ("RAFT-UPDATE", ("Hello", "There"))) 1000;
-            send_delay(raft, ("RAFT-UPDATE", ("Hello", "There"))) 1000;
-            send_delay(raft, ("RAFT-UPDATE", ("Hello", "There"))) 1000;
-            send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 4000
-    end
-
-    fun test5_local () =
-        let val raft = key_val_store_init true
-        in
-            send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
-            send_n_updates raft 5;
-            send(raft, ("SEND-TO-NTH", 1, "debug-snapshotcond"))
-    end
-
-    fun test6_local () = 
-        let val raft = key_val_store_init true
-        in
-            send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
-            send_delay(raft, ("SEND-TO-NTH", 1, ("RAFT-UPDATE", ("B", 1)))) 2000;
-            send_delay(raft, ("SEND-TO-NTH", 1, ("RAFT-UPDATE", ("A", 1)))) 2000;
-            send_delay(raft, ("SEND-TO-NTH", 1, ("RAFT-UPDATE", ("A", 1)))) 0;
-            send_delay(raft, ("SEND-TO-NTH", 1, ("RAFT-UPDATE", ("A", 1)))) 0;
-            send_delay(raft, ("SEND-TO-NTH", 3, "debug-timeout")) 10;
-            send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 5000
-    end
-
-    fun test_snapshot () =
-        let val raft = key_val_store_init true
-        in 
-            send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
-            send_delay(raft, ("SEND-TO-NTH", 3, "debug-pause")) 100;
-            send(raft, ("RAFT-UPDATE", ("A", 1)));
-            send_delay(raft, ("RAFT-UPDATE", ("A", 2))) 50;
-            send_delay(raft, ("RAFT-UPDATE", ("A", 4))) 50;
-            send_delay(raft, ("SEND-TO-NTH", 1, "debug-applysnapshot")) 100;
-            send_delay(raft, ("SEND-TO-NTH", 3, "debug-continue")) 100;
-            send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 500
-    end
-
-    fun test_lots_of_messages () = 
-        let val raft = key_val_store_init true 
-        in 
-            sleep 2000;
-            send_n_updates raft 1000;
-            send_delay(raft, ("SEND-TO-NTH", 1, "debug-applysnapshot")) 5000;
-            send_n_updates raft 1000;
-            send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 1000
-    end
-
-    fun test_lots_of_unique_messages () = 
-        let val raft = key_val_store_init true
-        in
-            sleep 5000;
-            send_n_unique_message raft 5;
-            send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 1000
-    end
     
-    (*fun initiate_3_distributed_nodes () =
-        let 
-            val node1 = initiate_distributed_node [] "1" "@node1" key_val_store
-            val node2 = initiate_distributed_node [node1] "2" "@node2" key_val_store
-            val node3 = initiate_distributed_node [node2, node1] "3" "@node3" key_val_store
-            val all_nodes = [node1, node2, node3]
-            val _ = send(node1, ("ADD_NODES", [node2, node3]))
-            val _ = send(node2, ("ADD_NODES", [node3]))
-            val _ = sleep 2000
-            val _ = send_to_all all_nodes ("RAFT-UPDATE", ("Victor", "Gruppemedlem 1")) (self())
-            val _ = sleep 2000
-            val _ = send_to_all all_nodes ("RAFT-UPDATE", ("Victor", "Gruppemedlem 2")) (self())
-            val _ = sleep 2000
-            val _ = send_to_all all_nodes ("debug-printlog") (self())
-        in receive [hn x => print x]
-    end*)
-        
+    (* #IMPORT libs/tests.trp *)
+
 in test3_local ()
 end
