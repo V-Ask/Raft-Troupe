@@ -1,5 +1,9 @@
 let 
     (* EXPORT START *)
+
+    (* Generates a default leader info, with the nextIndex of all followers
+    being the nextIndex of the new leader. This can be changed with followers
+    rejecting AppendEntries *)
     fun new_leader all_nodes log = 
         let val nextIndex = get_log_index log
             val index = map (fn id => {peer = id, next = nextIndex + 1}) all_nodes
@@ -9,17 +13,19 @@ let
             matchIndex = match_index
         } end
     
+    (* Get the nextIndex of a peer *)
     fun get_next_index leader_info peer = first (filter (fn (x) => x.peer = peer) leader_info.nextIndex)
 
+    (* Get the matchIndex of a peer *)
     fun get_match_index leader_info peer = first (filter (fn (x) => x.peer = peer) leader_info.matchIndex)
 
     fun update_next_index leader_info peer new = let
         val prevIndex = get_next_index leader_info peer
         val newIndex = {peer = peer, next = new}
-        val witoutPeer = filter (fn (x) => x.peer <> peer) leader_info.nextIndex
+        val withoutPeer = filter (fn (x) => x.peer <> peer) leader_info.nextIndex
     in {
         leader_info with 
-        nextIndex = newIndex :: witoutPeer
+        nextIndex = newIndex :: withoutPeer
     } end
 
     fun update_match_index leader_info peer new = let
@@ -31,9 +37,11 @@ let
         matchIndex = newIndex :: witoutPeer
     } end
 
-
+    (* Get all follower's matchIndex*)
     fun get_matches leader_info = map (fn x => x.match) leader_info.matchIndex
 
+    (* Get the highest index of entries that a majority of followers have
+    appended to, by finding the median *)
     fun calc_highest_commit matches = median matches
     (* EXPORT END *)
 in () end

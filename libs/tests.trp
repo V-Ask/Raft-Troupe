@@ -24,7 +24,7 @@ let
     end
 
 
-    fun test_local1 () = 
+    fun test1_local () = 
         let val raft = key_val_store_init true
         in
             send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));

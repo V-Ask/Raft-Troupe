@@ -1,12 +1,15 @@
     (* EXPORT START *)
+    (* Creates a snapshot *)
     fun set_snapshot snapshot index term = {
         snapshot = snapshot,
         lastIncludedIndex = index,
         lastIncludedTerm = term
     }
 
+    (* Creates a default, empty snapshot *)
     val empty_snapshot = set_snapshot () 0 0
 
+    (* A default, empty log*)
     val empty_log = {
         log = [],
         snapshot = empty_snapshot,
@@ -15,14 +18,7 @@
         lastMessageSerial = ""
     }
 
-    fun empty_log_with_snap snapshot = {
-        log = [],
-        snapshot = snapshot,
-        lastApplied = 0,
-        commitIndex = 0,
-        lastMessageSerial = ""
-    }
-
+    (* Appends a message to the log, and notes the message's serial number *)
     fun append_message log message term serial = 
         let val new_entry = {
             term = term,
@@ -36,22 +32,26 @@
         } 
     end
 
+    (* Appends a list of message to the log *)
     fun add_entries_to_log log entries term =
         case entries of
         [] => log
         | h :: t => 
             add_entries_to_log (append_message log h.command term) t h.term h.serial
 
+    (* Updates the lastApplied-index*)
     fun update_applied log = {
         log with
         lastApplied = log.lastApplied + 1
     }
     
+    (* Commits a message in the log *)
     fun update_commit log new_index = {
        log with 
        commitIndex = (max new_index log.commitIndex)
     }
 
+    (* Rolls the log back one entry*)
     fun rollback_log log =
         let val (_ :: prev_log) = log.log
     in {
@@ -59,9 +59,11 @@
         log = prev_log
     }
     end
-
+    
+    (* Get the entry of the latest log entry *)
     fun get_log_index log = (length log.log) + log.snapshot.lastIncludedIndex
 
+    (* Rolls the log back n time *)
     fun rollback_log_to log n = 
         if n < (get_log_index log) then
             let val log = rollback_log log
@@ -69,6 +71,8 @@
         end
         else log
 
+    (* Get the term of the latest entry of the log, or, if empty, the last
+    included index of the snapshot*)
     fun get_latest_entry_term log =
         case log.log of
         [] => log.snapshot.lastIncludedTerm
@@ -83,13 +87,16 @@
 
     fun get_nth_command log index = nth (reverse log.log) (index - log.snapshot.lastIncludedIndex) 
 
+    (* Returns a slice of all entries after log-index i *)
     fun get_commands_after_nth log n =
         let val log_slice = slice (n - log.snapshot.lastIncludedIndex) (length log.log) (reverse log.log)
         in log_slice
         end
 
+    (* Returns a slice of all entries after the commit-index *)
     fun uncommitted_entries log = slice (get_log_index log) log.commitIndex log.log
 
+    (* Applies all log-entries that have been committed, but not applied *)
     fun apply_log log f = if log.lastApplied < log.commitIndex 
         then 
             let val _ = f ((get_nth_command log (log.lastApplied + 1)).command) 
@@ -97,6 +104,7 @@
             in apply_log log f end
         else log
     
+    (* Receive a snapshot of the state-machine's current state *)
     fun take_snapshot state_machine index term = 
         let val pid = self()
             val _ = send (state_machine.pid, (state_machine.snapshot_gethook pid))
@@ -104,12 +112,13 @@
         in set_snapshot state index term
     end
 
+    (* Get a snapshot of all committed entries *)
     fun get_snapshot state_machine log = 
         let val lastCommitted = get_nth_command log log.commitIndex
         in take_snapshot state_machine log.commitIndex lastCommitted.term
     end
 
-
+    (* Applies a snapshot to the log *)
     fun apply_snapshot state_machine snapshot log =
         let val _ = send(state_machine.pid, snapshot.snapshot)
             val uncommitted_entries = uncommitted_entries log
@@ -126,12 +135,21 @@
                 snapshot = snapshot }
     end
 
+    (* Generates a summary of the log containing the amount of committed
+    entries, and the number of entries since the last Snapshot *)
     fun generate_summary log = 
-        {log_size = (length log.log), entries_since_snap = 51}
+        {committed_log_size = log.commitIndex, entries_since_snap = 51}
 
+    (* Asks the state-machine whether or not to snapshot *)
     fun get_snapshot_cond state_machine log = 
         let val p_id = self ()
             val summary = generate_summary log
-        in send(state_machine.pid, (state_machine.snapshot_condition_hook (summary, p_id)))
+        in 
+            send(state_machine.pid, (state_machine.snapshot_condition_hook (summary, p_id)));
+            receive [
+                hn ("SNAPSHOT-CALLBACK", callback) => 
+                    if callback then apply_snapshot state_machine (get_snapshot state_machine log) log
+                    else log
+            ]
     end
     (* EXPORT END *)
