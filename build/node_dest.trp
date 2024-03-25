@@ -372,7 +372,11 @@ let fun not a = a = false
                     hn ("SEND_HEARTBEAT", x) when nonce = x =>
                         let val _ = verbose_print (node.id^": Sending heartbeat") node.verbose
                         in leader_node node end,
-                    
+
+                    hn (("RAFT-UPDATE", x), dialer_id, serial_n) when serial_n = node.log.lastMessageSerial =>
+                        send(dialer_id, "DIALER-ACK");
+                        leader_node node,
+
                     hn (("RAFT-UPDATE", x), dialer_id, serial_n) => 
                         let val latestLogIndex = get_log_index node.log
                             val prevLogTerm = get_latest_log_term node.log
