@@ -113,7 +113,7 @@ let fun not a = a = false
         case entries of
         [] => log
         | h :: t => 
-            add_entries_to_log (append_message log h.command term) t h.term h.serial
+            add_entries_to_log (append_message log h.command term h.serial) t h.term
 
     (* Updates the lastApplied-index*)
     fun update_applied log = {
@@ -163,9 +163,9 @@ let fun not a = a = false
 
     fun get_nth_command log index = nth (reverse log.log) (index - log.snapshot.lastIncludedIndex) 
 
-    (* Returns a slice of all entries after log-index i *)
+    (* Returns a slice of all entries after log-index n *)
     fun get_commands_after_nth log n =
-        let val log_slice = slice (n - log.snapshot.lastIncludedIndex) (length log.log) (reverse log.log)
+        let val log_slice = slice (n - log.snapshot.lastIncludedIndex) (length log.log + 1) (reverse log.log)
         in log_slice
         end
 
@@ -180,7 +180,7 @@ let fun not a = a = false
             in apply_log log f end
         else log
     
-    (**)
+    (* Receive a snapshot of the state-machine's current state *)
     fun take_snapshot state_machine index term = 
         let val pid = self()
             val _ = send (state_machine.pid, (state_machine.snapshot_gethook pid))
@@ -188,31 +188,36 @@ let fun not a = a = false
         in set_snapshot state index term
     end
 
+    (* Get a snapshot of all committed entries *)
     fun get_snapshot state_machine log = 
         let val lastCommitted = get_nth_command log log.commitIndex
         in take_snapshot state_machine log.commitIndex lastCommitted.term
     end
 
-
+    (* Applies a snapshot to the log *)
     fun apply_snapshot state_machine snapshot log =
-        let val _ = send(state_machine.pid, snapshot.snapshot)
-            val uncommitted_entries = uncommitted_entries log
+        let val uncommitted_entries = uncommitted_entries log
             val newCommitIndex = 
                 if log.commitIndex < snapshot.lastIncludedIndex then snapshot.lastIncludedIndex
                 else log.commitIndex
             val newLastApplied =
                 if log.lastApplied < snapshot.lastIncludedIndex then snapshot.lastIncludedIndex
                 else log.lastApplied
-        in { log with 
+        in  send(state_machine.pid, snapshot.snapshot);
+            { log with 
                 log = uncommitted_entries,
                 commitIndex = newCommitIndex,
                 lastApplied = newLastApplied,
                 snapshot = snapshot }
     end
 
+    (* Generates a summary of the log containing the amount of committed
+    entries, and the number of entries since the last Snapshot *)
     fun generate_summary log = 
-        {committed_log_size = log.commitIndex, entries_since_snap = 51}
+        {applied_log_size = log.lastApplied, 
+            entries_since_snap = (log.lastApplied - log.snapshot.lastIncludedIndex)}
 
+    (* Asks the state-machine whether or not to snapshot *)
     fun get_snapshot_cond state_machine log = 
         let val p_id = self ()
             val summary = generate_summary log
@@ -270,8 +275,8 @@ let fun not a = a = false
                     end,
                 hn ("SET_SNAPSHOT", other_dic) => loop other_dic,
                 hn ("SNAPSHOT_CONDITION", (log_summary, sender_id)) => 
-                    let val callback = log_summary.committed_log_size > (length dic) 
-                        andalso log_summary.entries_since_snap > 50
+                    let val callback = log_summary.applied_log_size > (length dic) 
+                        andalso log_summary.entries_since_snap > 0
                     in 
                         send(sender_id, ("SNAPSHOT-CALLBACK", callback));
                         loop dic end,
@@ -284,6 +289,10 @@ let fun not a = a = false
     (* END OF libs/key-val.trp *)
 
     (* #IMPORT libs/leader-info.trp *)
+
+    (* Generates a default leader info, with the nextIndex of all followers
+    being the nextIndex of the new leader. This can be changed with followers
+    rejecting AppendEntries *)
     fun new_leader all_nodes log = 
         let val nextIndex = get_log_index log
             val index = map (fn id => {peer = id, next = nextIndex + 1}) all_nodes
@@ -293,17 +302,19 @@ let fun not a = a = false
             matchIndex = match_index
         } end
     
+    (* Get the nextIndex of a peer *)
     fun get_next_index leader_info peer = first (filter (fn (x) => x.peer = peer) leader_info.nextIndex)
 
+    (* Get the matchIndex of a peer *)
     fun get_match_index leader_info peer = first (filter (fn (x) => x.peer = peer) leader_info.matchIndex)
 
     fun update_next_index leader_info peer new = let
         val prevIndex = get_next_index leader_info peer
         val newIndex = {peer = peer, next = new}
-        val witoutPeer = filter (fn (x) => x.peer <> peer) leader_info.nextIndex
+        val withoutPeer = filter (fn (x) => x.peer <> peer) leader_info.nextIndex
     in {
         leader_info with 
-        nextIndex = newIndex :: witoutPeer
+        nextIndex = newIndex :: withoutPeer
     } end
 
     fun update_match_index leader_info peer new = let
@@ -315,9 +326,11 @@ let fun not a = a = false
         matchIndex = newIndex :: witoutPeer
     } end
 
-
+    (* Get all follower's matchIndex*)
     fun get_matches leader_info = map (fn x => x.match) leader_info.matchIndex
 
+    (* Get the highest index of entries that a majority of followers have
+    appended to, by finding the median *)
     fun calc_highest_commit matches = median matches
     (* END OF libs/leader-info.trp *)
 
@@ -334,8 +347,8 @@ let fun not a = a = false
         in spawn timeout
     end
 
-    (* Starts a random timeout with lower=1sec and upper=2sec *)
-    fun start_random_timeout func = start_timeout func (1000 + ((random ()) * 1000))
+    (* Starts a random timeout with lower=2sec and upper=4sec *)
+    fun start_random_timeout func = start_timeout func (2000 + ((random ()) * 2000))
     
     fun leader_node node = 
         let val p_id = self()
@@ -360,7 +373,7 @@ let fun not a = a = false
                         end
                 end
                 (* A follower should never get more entries than the leader *)
-                else print "ERROR"
+                else print node.log
             end
 
             (* Convert leader to follower *)
@@ -384,15 +397,9 @@ let fun not a = a = false
                             applied_log
                 in { node with log = snapshot_log }
                 end
-
-            (* Append entries for each follower *)
-            val _ = map (fn x => append_entries x) (filter (fn x => x <> p_id) node.all_nodes)
             val nonce = mkuuid ()
-            val _ = start_timeout (fn () => send (p_id, ("SEND_HEARTBEAT", nonce))) 500
-
-            fun loop node = 
-                let val node = apply_committed node
-                val _ = receive [
+            fun loop node = let val node = apply_committed node
+                in receive [
                     hn ("SEND_HEARTBEAT", x) when nonce = x =>
                         let val _ = verbose_print (node.id^": Sending heartbeat") node.verbose
                         in leader_node node end,
@@ -411,6 +418,7 @@ let fun not a = a = false
                             val leader_info = update_next_index leader_info p_id ((get_log_index log) + 1)
                             val node = {node with log = log, leader_info = leader_info}
                         in 
+                            print latestLogIndex;
                             verbose_print (node.id^": Appending new message to log") node.verbose;
                             send(dialer_id, "DIALER-ACK");
                             loop node end,
@@ -483,10 +491,12 @@ let fun not a = a = false
                         print (get_snapshot_cond node.state_machine node.log);
                         loop node,
                     hn _ => loop node
-                ] 
-                in ()  (* Vi skal sørge for at genstarte løkken i receive ellers opdatere loggen ikke*)
-            end
-        in loop node
+                ] end
+        in 
+            (* Append entries for each follower *)
+            map (fn x => append_entries x) (filter (fn x => x <> p_id) node.all_nodes);
+            start_timeout (fn () => send (p_id, ("SEND_HEARTBEAT", nonce))) 500;
+            loop node
     end
 
     and candidate node =
@@ -855,7 +865,7 @@ let fun not a = a = false
         in loop n 
     end
 
-    fun send_n_unique_message raft n =
+    fun send_n_unique_updates raft n =
         let fun loop n =
             send(raft, ("RAFT-UPDATE", (mkuuid(), "TEST")));
             print n;
@@ -943,21 +953,20 @@ let fun not a = a = false
     fun test_lots_of_messages () = 
         let val raft = key_val_store_init true 
         in 
-            sleep 2000;
+            send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
+            sleep 1000;
             send_n_updates raft 1000;
-            send_delay(raft, ("SEND-TO-NTH", 1, "debug-applysnapshot")) 5000;
-            send_n_updates raft 1000;
-            send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 1000
+            send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 5000
     end
 
     fun test_lots_of_unique_messages () = 
         let val raft = key_val_store_init true
         in
             sleep 5000;
-            send_n_unique_message raft 5;
+            send_n_unique_updates raft 5;
             send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 1000
     end
     (* END OF libs/tests.trp *)
 
-in test4_local ()
+in test_lots_of_messages ()
 end

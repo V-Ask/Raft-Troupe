@@ -93,8 +93,8 @@ let fun not a = a = false
         in spawn timeout
     end
 
-    (* Starts a random timeout with lower=1sec and upper=2sec *)
-    fun start_random_timeout func = start_timeout func (1000 + ((random ()) * 1000))
+    (* Starts a random timeout with lower=2sec and upper=4sec *)
+    fun start_random_timeout func = start_timeout func (2000 + ((random ()) * 2000))
     
     fun leader_node node = 
         let val p_id = self()
@@ -119,7 +119,7 @@ let fun not a = a = false
                         end
                 end
                 (* A follower should never get more entries than the leader *)
-                else print "ERROR"
+                else print node.log
             end
 
             (* Convert leader to follower *)
@@ -143,15 +143,9 @@ let fun not a = a = false
                             applied_log
                 in { node with log = snapshot_log }
                 end
-
-            (* Append entries for each follower *)
-            val _ = map (fn x => append_entries x) (filter (fn x => x <> p_id) node.all_nodes)
             val nonce = mkuuid ()
-            val _ = start_timeout (fn () => send (p_id, ("SEND_HEARTBEAT", nonce))) 500
-
-            fun loop node = 
-                let val node = apply_committed node
-                val _ = receive [
+            fun loop node = let val node = apply_committed node
+                in receive [
                     hn ("SEND_HEARTBEAT", x) when nonce = x =>
                         let val _ = verbose_print (node.id^": Sending heartbeat") node.verbose
                         in leader_node node end,
@@ -170,6 +164,7 @@ let fun not a = a = false
                             val leader_info = update_next_index leader_info p_id ((get_log_index log) + 1)
                             val node = {node with log = log, leader_info = leader_info}
                         in 
+                            print latestLogIndex;
                             verbose_print (node.id^": Appending new message to log") node.verbose;
                             send(dialer_id, "DIALER-ACK");
                             loop node end,
@@ -242,10 +237,12 @@ let fun not a = a = false
                         print (get_snapshot_cond node.state_machine node.log);
                         loop node,
                     hn _ => loop node
-                ] 
-                in ()  (* Vi skal sørge for at genstarte løkken i receive ellers opdatere loggen ikke*)
-            end
-        in loop node
+                ] end
+        in 
+            (* Append entries for each follower *)
+            map (fn x => append_entries x) (filter (fn x => x <> p_id) node.all_nodes);
+            start_timeout (fn () => send (p_id, ("SEND_HEARTBEAT", nonce))) 500;
+            loop node
     end
 
     and candidate node =
@@ -602,5 +599,5 @@ let fun not a = a = false
     
     (* #IMPORT libs/tests.trp *)
 
-in test4_local ()
+in test_lots_of_messages ()
 end

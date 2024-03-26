@@ -37,7 +37,7 @@
         case entries of
         [] => log
         | h :: t => 
-            add_entries_to_log (append_message log h.command term) t h.term h.serial
+            add_entries_to_log (append_message log h.command term h.serial) t h.term
 
     (* Updates the lastApplied-index*)
     fun update_applied log = {
@@ -87,7 +87,7 @@
 
     fun get_nth_command log index = nth (reverse log.log) (index - log.snapshot.lastIncludedIndex) 
 
-    (* Returns a slice of all entries after log-index i *)
+    (* Returns a slice of all entries after log-index n *)
     fun get_commands_after_nth log n =
         let val log_slice = slice (n - log.snapshot.lastIncludedIndex) (length log.log) (reverse log.log)
         in log_slice
@@ -120,15 +120,15 @@
 
     (* Applies a snapshot to the log *)
     fun apply_snapshot state_machine snapshot log =
-        let val _ = send(state_machine.pid, snapshot.snapshot)
-            val uncommitted_entries = uncommitted_entries log
+        let val uncommitted_entries = uncommitted_entries log
             val newCommitIndex = 
                 if log.commitIndex < snapshot.lastIncludedIndex then snapshot.lastIncludedIndex
                 else log.commitIndex
             val newLastApplied =
                 if log.lastApplied < snapshot.lastIncludedIndex then snapshot.lastIncludedIndex
                 else log.lastApplied
-        in { log with 
+        in  send(state_machine.pid, snapshot.snapshot);
+            { log with 
                 log = uncommitted_entries,
                 commitIndex = newCommitIndex,
                 lastApplied = newLastApplied,
@@ -138,7 +138,8 @@
     (* Generates a summary of the log containing the amount of committed
     entries, and the number of entries since the last Snapshot *)
     fun generate_summary log = 
-        {committed_log_size = log.commitIndex, entries_since_snap = 51}
+        {applied_log_size = log.lastApplied, 
+            entries_since_snap = (log.lastApplied - log.snapshot.lastIncludedIndex)}
 
     (* Asks the state-machine whether or not to snapshot *)
     fun get_snapshot_cond state_machine log = 

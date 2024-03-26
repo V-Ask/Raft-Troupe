@@ -14,7 +14,7 @@ let
         in loop n 
     end
 
-    fun send_n_unique_message raft n =
+    fun send_n_unique_updates raft n =
         let fun loop n =
             send(raft, ("RAFT-UPDATE", (mkuuid(), "TEST")));
             print n;
@@ -102,18 +102,17 @@ let
     fun test_lots_of_messages () = 
         let val raft = key_val_store_init true 
         in 
-            sleep 2000;
+            send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
+            sleep 1000;
             send_n_updates raft 1000;
-            send_delay(raft, ("SEND-TO-NTH", 1, "debug-applysnapshot")) 5000;
-            send_n_updates raft 1000;
-            send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 1000
+            send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 5000
     end
 
     fun test_lots_of_unique_messages () = 
         let val raft = key_val_store_init true
         in
             sleep 5000;
-            send_n_unique_message raft 5;
+            send_n_unique_updates raft 5;
             send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 1000
     end
     (* EXPORT END *)
