@@ -94,7 +94,7 @@
         end
 
     (* Returns a slice of all entries after the commit-index *)
-    fun uncommitted_entries log = slice (get_log_index log) log.commitIndex log.log
+    fun uncommitted_entries log = get_commands_after_nth log log.commitIndex
 
     (* Applies all log-entries that have been committed, but not applied *)
     fun apply_log log f = if log.lastApplied < log.commitIndex 
@@ -121,7 +121,7 @@
     (* Applies a snapshot to the log *)
     fun apply_snapshot state_machine snapshot log =
         let val uncommitted_entries = uncommitted_entries log
-            val newCommitIndex = 
+            val newCommitIndex =
                 if log.commitIndex < snapshot.lastIncludedIndex then snapshot.lastIncludedIndex
                 else log.commitIndex
             val newLastApplied =

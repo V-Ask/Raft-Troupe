@@ -165,12 +165,12 @@ let fun not a = a = false
 
     (* Returns a slice of all entries after log-index n *)
     fun get_commands_after_nth log n =
-        let val log_slice = slice (n - log.snapshot.lastIncludedIndex) (length log.log + 1) (reverse log.log)
+        let val log_slice = slice (n - log.snapshot.lastIncludedIndex) (length log.log) (reverse log.log)
         in log_slice
         end
 
     (* Returns a slice of all entries after the commit-index *)
-    fun uncommitted_entries log = slice (get_log_index log) log.commitIndex log.log
+    fun uncommitted_entries log = get_commands_after_nth log log.commitIndex
 
     (* Applies all log-entries that have been committed, but not applied *)
     fun apply_log log f = if log.lastApplied < log.commitIndex 
@@ -197,7 +197,7 @@ let fun not a = a = false
     (* Applies a snapshot to the log *)
     fun apply_snapshot state_machine snapshot log =
         let val uncommitted_entries = uncommitted_entries log
-            val newCommitIndex = 
+            val newCommitIndex =
                 if log.commitIndex < snapshot.lastIncludedIndex then snapshot.lastIncludedIndex
                 else log.commitIndex
             val newLastApplied =
@@ -956,6 +956,16 @@ let fun not a = a = false
             send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
             sleep 1000;
             send_n_updates raft 1000;
+            send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 5000
+    end
+
+    fun test_messages () = 
+        let val raft = key_val_store_init true 
+        in 
+            send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
+            send_delay(raft, ("RAFT-UPDATE", ("A", 2))) 1000;
+            send_delay(raft, ("RAFT-UPDATE", ("A", 3))) 500;
+            send_delay(raft, ("RAFT-UPDATE", ("A", 4))) 10;
             send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 5000
     end
 

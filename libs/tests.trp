@@ -108,6 +108,16 @@ let
             send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 5000
     end
 
+    fun test_messages () = 
+        let val raft = key_val_store_init true 
+        in 
+            send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
+            send_delay(raft, ("RAFT-UPDATE", ("A", 2))) 1000;
+            send_delay(raft, ("RAFT-UPDATE", ("A", 3))) 500;
+            send_delay(raft, ("RAFT-UPDATE", ("A", 4))) 10;
+            send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 5000
+    end
+
     fun test_lots_of_unique_messages () = 
         let val raft = key_val_store_init true
         in
