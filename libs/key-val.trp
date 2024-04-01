@@ -43,7 +43,7 @@
                 hn ("SET_SNAPSHOT", other_dic) => loop other_dic,
                 hn ("SNAPSHOT_CONDITION", (log_summary, sender_id)) => 
                     let val callback = log_summary.applied_log_size > (length dic) 
-                        andalso log_summary.entries_since_snap > 0
+                        andalso log_summary.entries_since_snap > 50
                     in 
                         send(sender_id, ("SNAPSHOT-CALLBACK", callback));
                         loop dic end,
