@@ -164,7 +164,6 @@ let fun not a = a = false
                             val leader_info = update_next_index leader_info p_id ((get_log_index log) + 1)
                             val node = {node with log = log, leader_info = leader_info}
                         in 
-                            print latestLogIndex;
                             verbose_print (node.id^": Appending new message to log") node.verbose;
                             send(dialer_id, "DIALER-ACK");
                             loop node end,
