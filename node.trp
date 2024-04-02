@@ -482,7 +482,7 @@ let fun not a = a = false
     end
 
     (* Spawn a state-machine on a seperate thread, creates a record*)
-    fun initiate_node all_nodes id state_machine sethook gethook snapshot_gethook snapshot_sethook snapshot_condition_hook verbose = 
+    fun initiate_node state_machine sethook gethook snapshot_gethook snapshot_sethook snapshot_condition_hook all_nodes id verbose = 
         let val state_machine_pid = spawn state_machine 
             val state_machine_record = 
                 {pid = state_machine_pid, 
@@ -495,19 +495,27 @@ let fun not a = a = false
     end
 
     (* Spawn a state-machine on some alias *)
-    fun initiate_distributed_node all_nodes id alias state_machine = 
+    fun initiate_distributed_node state_machine sethook gethook snapshot_gethook snapshot_sethook snapshot_condition_hook all_nodes id alias verbose = 
         let val state_machine_pid = spawn(alias, state_machine)
-        in spawn(alias, (default_node all_nodes id state_machine_pid))
+            val state_machine_record = 
+                {pid = state_machine_pid, 
+                sethook = sethook, 
+                gethook = gethook, 
+                snapshot_gethook = snapshot_gethook,
+                snapshot_sethook = snapshot_sethook,
+                snapshot_condition_hook = snapshot_condition_hook}
+        in spawn(alias, (default_node all_nodes id state_machine_record verbose))
     end
     
     (* Spawn n nodes*)
     fun initiate_nodes n state_machine sethook gethook snapshot_gethook snapshot_sethook snapshot_condition_hook verbose =
-        let fun get_nodes n acc_id =
+        let val part_init = initiate_node state_machine sethook gethook snapshot_gethook snapshot_sethook snapshot_condition_hook
+            fun get_nodes n acc_id =
                 case n of
                 0 => []
                 | x => append 
                     (get_nodes (x - 1) (acc_id ^ "I")) 
-                    [(initiate_node [] acc_id state_machine sethook gethook snapshot_gethook snapshot_sethook snapshot_condition_hook verbose)]
+                    [(part_init [] acc_id verbose)]
             
             fun add_refs nodes = 
                 let fun loop remaining = 
@@ -530,12 +538,14 @@ let fun not a = a = false
             fun random_leader () =
                 let fun roundUp n m = 
                         if n <= 0 then m else roundUp (n - 1) (m + 1)
-                in nth cluster (roundUp (random() * (length cluster)) 0)
+                    val r_n = roundUp (random() * (length cluster - 1)) 0 
+                in nth cluster r_n
             end
             val leader = random_leader ()
 
             fun send_message msg leader = let 
                 val nonce = mkuuid()
+                val msg_timeout = start_timeout (fn() => send(p_id, ("MESSAGE-TIMEOUT", nonce)))
                 fun wait () =
                     receive [
                     hn ("NOT-LEADER", leader_id) => 
@@ -546,8 +556,11 @@ let fun not a = a = false
                         else wait ()
                 ]
                 in
-                    start_timeout (fn() => send(p_id, ("MESSAGE-TIMEOUT", nonce))) 4000;
-                    send(leader, msg);
+                    (case leader of
+                    () => msg_timeout 500
+                    | x =>                         
+                        msg_timeout 4000; 
+                        send(x, msg));
                     wait ()
             end
 
@@ -578,8 +591,22 @@ let fun not a = a = false
         in loop leader
     end
 
+    (* Spawns a distributed Raft network, and a dialer, which can be contacted to
+    communicate with their state-machines *)
+    fun raft_d state_machine_func set_hook get_hook get_snapshot_hook set_snapshot_hook snapshot_condition_hook verbose =
+        let val part_init = initiate_distributed_node state_machine_func set_hook get_hook get_snapshot_hook set_snapshot_hook snapshot_condition_hook
+            val node1 = part_init [] "1" "@node1" verbose
+            val node2 = part_init [node1] "2" "@node2" verbose
+            val node3 = part_init [node1, node2] "3" "@node3" verbose
+            val dialer = (fn () => dialer [node1, node2, node3])
+        in 
+            send(node1, ("ADD_NODES", [node2, node3]));
+            send(node2, ("ADD_NODES", [node3]));
+            spawn dialer
+    end
+
     (* Spawns a Raft network, and a dialer, which can be contacted to
-    communicate with their state-machines*)
+    communicate with their state-machines *)
     fun raft state_machine_func set_hook get_hook get_snapshot_hook set_snapshot_hook snapshot_condition_hook verbose =
         let val nodes = initiate_nodes 5 state_machine_func set_hook get_hook get_snapshot_hook set_snapshot_hook snapshot_condition_hook verbose
             val dialer = (fn () => dialer nodes)
@@ -587,8 +614,8 @@ let fun not a = a = false
     end
 
     (* Application of the Raft algorithm on a key-value-store*)
-    fun key_val_store_init verbose =
-        raft key_val_store 
+    fun key_val_store_init raft_fun verbose =
+        raft_fun key_val_store 
             (fn x => case x of (key, value) => ("SET", (key, value))) 
             (fn (x, callback_pid) => ("GET", (x, callback_pid)))
             (fn (callback_pid) => ("GET_SNAPSHOT", callback_pid))
@@ -598,5 +625,5 @@ let fun not a = a = false
     
     (* #IMPORT libs/tests.trp *)
 
-in test_lots_of_messages ()
+in test1_dist ()
 end

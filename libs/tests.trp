@@ -23,9 +23,8 @@ let
         in loop n
     end
 
-
     fun test1_local () = 
-        let val raft = key_val_store_init true
+        let val raft = key_val_store_init raft true
         in
             send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
             send_delay(raft, ("RAFT-UPDATE", ("Hello", "There"))) 500;
@@ -39,7 +38,7 @@ let
     end
 
     fun test2_local () = 
-        let val raft = key_val_store_init true
+        let val raft = key_val_store_init raft true
         in 
             send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
             send(raft, ("SEND-TO-NTH", 2, "debug-timeout"));
@@ -48,7 +47,7 @@ let
 
     fun test3_local () = 
         let val p_id = self()
-            val raft = key_val_store_init true
+            val raft = key_val_store_init raft true
         in 
             send_delay(raft, ("RAFT-UPDATE", ("A", 42))) 2000;
             send_delay(raft, ("RAFT-GET", ("A", p_id))) 1000;
@@ -56,7 +55,7 @@ let
     end
 
     fun test4_local () = 
-        let val raft = key_val_store_init true
+        let val raft = key_val_store_init raft true
         in
             send_delay(raft, ("RAFT-UPDATE", ("Hello", "There"))) 2000;
             send_delay(raft, ("RAFT-UPDATE", ("Hello", "There"))) 1000;
@@ -67,7 +66,7 @@ let
     end
 
     fun test5_local () =
-        let val raft = key_val_store_init true
+        let val raft = key_val_store_init raft true
         in
             send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
             send_n_updates raft 5;
@@ -75,7 +74,7 @@ let
     end
 
     fun test6_local () = 
-        let val raft = key_val_store_init true
+        let val raft = key_val_store_init raft true
         in
             send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
             send_delay(raft, ("SEND-TO-NTH", 1, ("RAFT-UPDATE", ("B", 1)))) 2000;
@@ -86,8 +85,18 @@ let
             send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 5000
     end
 
+    fun test7_local () = 
+        let val raft = key_val_store_init raft true 
+        in 
+            send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
+            send_delay(raft, ("RAFT-UPDATE", ("A", 2))) 1000;
+            send_delay(raft, ("RAFT-UPDATE", ("A", 3))) 500;
+            send_delay(raft, ("RAFT-UPDATE", ("A", 4))) 10;
+            send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 5000
+    end
+
     fun test_snapshot () =
-        let val raft = key_val_store_init true
+        let val raft = key_val_store_init raft true
         in 
             send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
             send_delay(raft, ("SEND-TO-NTH", 3, "debug-pause")) 100;
@@ -100,7 +109,7 @@ let
     end
 
     fun test_lots_of_messages () = 
-        let val raft = key_val_store_init true 
+        let val raft = key_val_store_init raft true 
         in 
             send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
             sleep 1000;
@@ -108,38 +117,21 @@ let
             send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 5000
     end
 
-    fun test_messages () = 
-        let val raft = key_val_store_init true 
-        in 
-            send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
-            send_delay(raft, ("RAFT-UPDATE", ("A", 2))) 1000;
-            send_delay(raft, ("RAFT-UPDATE", ("A", 3))) 500;
-            send_delay(raft, ("RAFT-UPDATE", ("A", 4))) 10;
-            send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 5000
-    end
-
     fun test_lots_of_unique_messages () = 
-        let val raft = key_val_store_init true
+        let val raft = key_val_store_init raft true
         in
             sleep 5000;
             send_n_unique_updates raft 5;
             send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 1000
     end
+
+    fun test1_dist () = 
+        let val raft = key_val_store_init raft_d true
+            val p_id = self()
+        in
+            print raft;
+            send_delay (raft, ("RAFT-UPDATE", ("A", 42))) 2000;
+            send_delay (raft, ("RAFT-GET", ("A", p_id))) 2000;
+            receive [hn x => print x]
+    end
     (* EXPORT END *)
-    
-    (*fun initiate_3_distributed_nodes () =
-        let 
-            val node1 = initiate_distributed_node [] "1" "@node1" key_val_store
-            val node2 = initiate_distributed_node [node1] "2" "@node2" key_val_store
-            val node3 = initiate_distributed_node [node2, node1] "3" "@node3" key_val_store
-            val all_nodes = [node1, node2, node3]
-            val _ = send(node1, ("ADD_NODES", [node2, node3]))
-            val _ = send(node2, ("ADD_NODES", [node3]))
-            val _ = sleep 2000
-            val _ = send_to_all all_nodes ("RAFT-UPDATE", ("Victor", "Gruppemedlem 1")) (self())
-            val _ = sleep 2000
-            val _ = send_to_all all_nodes ("RAFT-UPDATE", ("Victor", "Gruppemedlem 2")) (self())
-            val _ = sleep 2000
-            val _ = send_to_all all_nodes ("debug-printlog") (self())
-        in receive [hn x => print x]
-    end*)

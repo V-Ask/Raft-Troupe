@@ -18,8 +18,8 @@ zero.listener2:
 zero.listener3:
 	$(START) zero.trp --id=ids/node3.json --rspawn=true --aliases=aliases.json --stdiolev={} # --debug --debugp2p
 
-raft.dialer:
-	$(START) node.trp --id=ids/raft-dialer.json --aliases=aliases.json # --debug --debugp2p
+raft.dialer: build/node_dest.trp
+	$(START) ./build/node_dest.trp --id=ids/raft-dialer.json --aliases=aliases.json # --debug --debugp2p
 
 
 create-network-identifiers:
