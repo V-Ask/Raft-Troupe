@@ -53,4 +53,11 @@
             end
         in loop dic
     end
+
+    val key_val_store_hooks = 
+        {sethook = (fn x => case x of (key, value) => ("SET", (key, value))), 
+            gethook = (fn (x, callback_pid) => ("GET", (x, callback_pid))), 
+            snapshot_gethook = (fn (callback_pid) => ("GET_SNAPSHOT", callback_pid)),
+            snapshot_sethook = (fn x => ("SET_SNAPSHOT", x)),
+            snapshot_condition_hook = (fn (log_summary, callback_pid) => ("SNAPSHOT_CONDITION", (log_summary, callback_pid)))}
     (* EXPORT END *)

@@ -105,21 +105,22 @@
         else log
     
     (* Receive a snapshot of the state-machine's current state *)
-    fun take_snapshot state_machine index term = 
+    fun take_snapshot state_machine_pid hooks index term = 
         let val pid = self()
-            val _ = send (state_machine.pid, (state_machine.snapshot_gethook pid))
-            val state = receive[hn ("SNAPSHOT", x) => x]
+            val state = 
+                send (state_machine_pid, (hooks.snapshot_gethook pid)); 
+                receive[hn ("SNAPSHOT", x) => x]
         in set_snapshot state index term
     end
 
     (* Get a snapshot of all committed entries *)
-    fun get_snapshot state_machine log = 
+    fun get_snapshot state_machine_pid hooks log = 
         let val lastCommitted = get_nth_command log log.commitIndex
-        in take_snapshot state_machine log.commitIndex lastCommitted.term
+        in take_snapshot state_machine_pid hooks log.commitIndex lastCommitted.term
     end
 
     (* Applies a snapshot to the log *)
-    fun apply_snapshot state_machine snapshot log =
+    fun apply_snapshot state_machine_pid snapshot log =
         let val uncommitted_entries = uncommitted_entries log
             val newCommitIndex =
                 if log.commitIndex < snapshot.lastIncludedIndex then snapshot.lastIncludedIndex
@@ -127,7 +128,7 @@
             val newLastApplied =
                 if log.lastApplied < snapshot.lastIncludedIndex then snapshot.lastIncludedIndex
                 else log.lastApplied
-        in  send(state_machine.pid, snapshot.snapshot);
+        in  send(state_machine_pid, snapshot.snapshot);
             { log with 
                 log = uncommitted_entries,
                 commitIndex = newCommitIndex,
@@ -142,14 +143,14 @@
             entries_since_snap = (log.lastApplied - log.snapshot.lastIncludedIndex)}
 
     (* Asks the state-machine whether or not to snapshot *)
-    fun get_snapshot_cond state_machine log = 
+    fun evaluate_snapshot_cond state_machine_pid hooks log = 
         let val p_id = self ()
             val summary = generate_summary log
         in 
-            send(state_machine.pid, (state_machine.snapshot_condition_hook (summary, p_id)));
+            send(state_machine_pid, (hooks.snapshot_condition_hook (summary, p_id)));
             receive [
                 hn ("SNAPSHOT-CALLBACK", callback) => 
-                    if callback then apply_snapshot state_machine (get_snapshot state_machine log) log
+                    if callback then apply_snapshot state_machine_pid (get_snapshot state_machine_pid hooks log) log
                     else log
             ]
     end

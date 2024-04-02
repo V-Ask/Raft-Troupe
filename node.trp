@@ -59,7 +59,8 @@ import quickselect
         voted_for: string,
         leader: string,
         leader_info: LeaderInfo,
-        state_machine: StateMachine,
+        state_machine_pid
+        hooks: StateMachine,
         verbose: boolean
     }
 *)
@@ -135,10 +136,10 @@ let fun not a = a = false
                 let val prev_commit = node.log.commitIndex
                     val highest_commit = calc_highest_commit (map (fn x => x.match) node.leader_info.matchIndex)
                     val node = { node with log = update_commit node.log highest_commit }
-                    val applied_log = apply_log node.log (fn x => send (node.state_machine.pid, x))
+                    val applied_log = apply_log node.log (fn x => send (node.state_machine_pid, x))
                     val snapshot_log = 
                         if prev_commit < highest_commit then 
-                            get_snapshot_cond node.state_machine applied_log 
+                            evaluate_snapshot_cond node.state_machine_pid node.hooks applied_log 
                         else 
                             applied_log
                 in { node with log = snapshot_log }
@@ -159,7 +160,7 @@ let fun not a = a = false
                     hn (("RAFT-UPDATE", x), dialer_id, serial_n) => 
                         let val latestLogIndex = get_log_index node.log
                             val prevLogTerm = get_latest_log_term node.log
-                            val log = append_message node.log (node.state_machine.sethook x) node.term serial_n
+                            val log = append_message node.log (node.hooks.sethook x) node.term serial_n
                             val leader_info = update_match_index node.leader_info p_id (get_log_index log)
                             val leader_info = update_next_index leader_info p_id ((get_log_index log) + 1)
                             val node = {node with log = log, leader_info = leader_info}
@@ -169,7 +170,7 @@ let fun not a = a = false
                             loop node end,
 
                     hn (("RAFT-GET", x), dialer_id) =>
-                        send (node.state_machine.pid, (node.state_machine.gethook x));
+                        send (node.state_machine_pid, (node.hooks.gethook x));
                         send(dialer_id, "DIALER-ACK");
                         loop node,
 
@@ -190,10 +191,10 @@ let fun not a = a = false
 
                     (* If another node has been elected as a candidate, and
                         their term is in front of ours, convert to a follower *)
-                    hn ("RequestVote", (c_term, other_c_id, c_log_index, c_log_term, p_id)) when c_term > node.term =>
-                        let val _ = send(p_id, ("YES-VOTE", node.id))
-                        in follower (demote c_term () other_c_id node)
-                        end,
+                    hn ("RequestVote", (c_term, c_id, c_log_index, c_log_term)) when c_term > node.term =>
+                        verbose_print (node.id^": Voting yes") node.verbose;
+                        send(c_id, ("YES-VOTE", node.id));
+                        follower (demote c_term () c_id node),
 
                     (* If we receive snapshot from a leader in a higher term,
                     convert to follower *)
@@ -226,14 +227,14 @@ let fun not a = a = false
 
                     (* Applies a snapshot *)
                     hn ("debug-applysnapshot") =>
-                        let val snapshot = get_snapshot node.state_machine node.log
-                            val node = {node with log = apply_snapshot node.state_machine snapshot node.log}
+                        let val snapshot = get_snapshot node.state_machine_pid node.hooks node.log
+                            val node = {node with log = apply_snapshot node.state_machine_pid snapshot node.log}
                             val _ = verbose_print (node.id^": applying snapshot") node.verbose
                         in loop node end,
 
                     (* Asks the state-machine for the snapshot condition *)
                     hn ("debug-snapshotcond") =>
-                        print (get_snapshot_cond node.state_machine node.log);
+                        print (evaluate_snapshot_cond node.state_machine_pid node.hooks node.log);
                         loop node,
                     hn _ => loop node
                 ] end
@@ -280,8 +281,8 @@ let fun not a = a = false
                         follower node,
 
                     (* Received vote request from leader in later term *)
-                    hn ("RequestVote", (c_term, other_c_id, c_log_index, c_log_term, p_id)) when c_term > node.term =>
-                        let val _ = send(p_id, ("YES-VOTE", node.id))
+                    hn ("RequestVote", (c_term, other_c_id, c_log_index, c_log_term)) when c_term > node.term =>
+                        let val _ = send(other_c_id, ("YES-VOTE", node.id))
                         in follower ({ node with term = c_term, voted_for = other_c_id})
                         end,
                     
@@ -324,7 +325,7 @@ let fun not a = a = false
                 send(c_id, ("YES-VOTE", node.id));
                 { node with term = c_term, voted_for = c_id } 
             fun loop node = 
-                let val node = { node with log = apply_log node.log (fn x => send (node.state_machine.pid, x)) }
+                let val node = { node with log = apply_log node.log (fn x => send (node.state_machine_pid, x)) }
                 fun start_election () =
                     let val _ = verbose_print (node.id^": START ELECTION") node.verbose
                     in candidate ({node with term = node.term + 1})
@@ -379,11 +380,11 @@ let fun not a = a = false
                                 else if lastIncludedIndex <= log_index then false
                                 else true
 
-                            val newlog = if accepting then apply_snapshot node.state_machine x node.log else node.log
+                            val newlog = if accepting then apply_snapshot node.state_machine_pid x node.log else node.log
                             val reject = fn () => send (l_id, ("REJECT", (p_id, {term = term, leader = leader}, (get_log_index newlog))))
                             val ack = fn () => send (l_id, ("ACKNOWLEGDE", (p_id, get_log_index newlog)))
 
-                            val newlog = if accepting then apply_snapshot node.state_machine x node.log else node.log
+                            val newlog = if accepting then apply_snapshot node.state_machine_pid x node.log else node.log
                             val reject = 
                                 fn () => send (l_id, ("REJECT", (p_id, {term = node.term, leader = node.leader}, (get_log_index newlog))))
                             val ack = 
@@ -402,7 +403,7 @@ let fun not a = a = false
                     Update log accordingly.*)
                     hn ("AppendEntries", x, l_id, leader_term, latestLogIndex, prevLogTerm, leaderCommit) => 
                         let val node = {node with leader = 
-                                if node.leader = () orelse node.term < leader_term then l_id
+                                if node.leader = () orelse node.term <= leader_term then l_id
                                 else node.leader}
                             val accepting = 
                                 if leader_term < node.term then false
@@ -466,72 +467,68 @@ let fun not a = a = false
     
     (* Defines a default node, being a follower in term 1 without a leader and
     the state-machine in its beginning state *)
-    fun default_node all_nodes id state_machine_record verbose = 
+    fun default_node state_machine_pid id hooks verbose = 
         let val node = {
-            all_nodes = all_nodes,
+            all_nodes = [],
             id = id,
             log = empty_log,
             term = 1,
             voted_for = (),
             leader = (),
             leader_info = (),
-            state_machine = state_machine_record,
+            state_machine_pid = state_machine_pid,
+            hooks = hooks,
             verbose = verbose
         }
         in fn() => follower node
     end
 
     (* Spawn a state-machine on a seperate thread, creates a record*)
-    fun initiate_node state_machine sethook gethook snapshot_gethook snapshot_sethook snapshot_condition_hook all_nodes id verbose = 
-        let val state_machine_pid = spawn state_machine 
-            val state_machine_record = 
-                {pid = state_machine_pid, 
-                sethook = sethook, 
-                gethook = gethook, 
-                snapshot_gethook = snapshot_gethook,
-                snapshot_sethook = snapshot_sethook,
-                snapshot_condition_hook = snapshot_condition_hook}
-        in spawn (default_node all_nodes id state_machine_record verbose)
+    fun initiate_node state_machine_func hooks id verbose = 
+        let val state_machine_pid = spawn state_machine_func
+        in spawn (default_node state_machine_pid id hooks verbose)
     end
 
-    (* Spawn a state-machine on some alias *)
-    fun initiate_distributed_node state_machine sethook gethook snapshot_gethook snapshot_sethook snapshot_condition_hook all_nodes id alias verbose = 
-        let val state_machine_pid = spawn(alias, state_machine)
-            val state_machine_record = 
-                {pid = state_machine_pid, 
-                sethook = sethook, 
-                gethook = gethook, 
-                snapshot_gethook = snapshot_gethook,
-                snapshot_sethook = snapshot_sethook,
-                snapshot_condition_hook = snapshot_condition_hook}
-        in spawn(alias, (default_node all_nodes id state_machine_record verbose))
-    end
+    (* Sends a list of all nodes to all nodes *)
+    fun add_refs nodes = 
+        map (fn x => send(x, ("ADD_NODES", nodes))) nodes
     
     (* Spawn n nodes*)
-    fun initiate_nodes n state_machine sethook gethook snapshot_gethook snapshot_sethook snapshot_condition_hook verbose =
-        let val part_init = initiate_node state_machine sethook gethook snapshot_gethook snapshot_sethook snapshot_condition_hook
-            fun get_nodes n acc_id =
+    fun initiate_nodes n state_machine hooks verbose =
+        let val part_init = initiate_node state_machine hooks
+            fun spawn_nodes n acc_id =
                 case n of
                 0 => []
                 | x => append 
-                    (get_nodes (x - 1) (acc_id ^ "I")) 
-                    [(part_init [] acc_id verbose)]
-            
-            fun add_refs nodes = 
-                let fun loop remaining = 
-                    case remaining of
-                    [] => ()
-                    | h :: t => 
-                        let val _ = send(h, ("ADD_NODES", nodes))
-                        in loop t
-                        end
-                in loop nodes
-                end
-            val nodes = get_nodes n "I"
-            val _ = add_refs nodes
-        in nodes
+                    (spawn_nodes (x - 1) (acc_id ^ "I")) 
+                    [(part_init acc_id verbose)]
+
+            val nodes = spawn_nodes n "I"
+        in 
+            add_refs nodes;
+            nodes
     end
 
+    (* Spawn a state-machine on some alias *)
+    fun initiate_distributed_node state_machine hooks id alias verbose = 
+        let val state_machine_pid = spawn(alias, state_machine)
+        in spawn(alias, (default_node state_machine_pid id hooks verbose))
+    end
+
+    fun initiate_distributed_nodes aliases state_machine hooks verbose =
+        let val part_init = initiate_distributed_node state_machine hooks
+            fun spawn_nodes acc acc_id =
+                case acc of 
+                [] => []
+                | alias :: t =>
+                    append (spawn_nodes (t (acc_id ^ "I"))) [part_init acc_id alias verbose]
+
+            val nodes = spawn_nodes aliases "I"
+        in
+            add_refs nodes;
+            nodes
+    end
+                    
     (* Facilitates client-side interaction to the Raft cluster *)
     fun dialer cluster = 
         let val p_id = self()
@@ -559,7 +556,7 @@ let fun not a = a = false
                     (case leader of
                     () => msg_timeout 500
                     | x =>                         
-                        msg_timeout 4000; 
+                        msg_timeout 2000; 
                         send(x, msg));
                     wait ()
             end
@@ -593,37 +590,25 @@ let fun not a = a = false
 
     (* Spawns a distributed Raft network, and a dialer, which can be contacted to
     communicate with their state-machines *)
-    fun raft_d state_machine_func set_hook get_hook get_snapshot_hook set_snapshot_hook snapshot_condition_hook verbose =
-        let val part_init = initiate_distributed_node state_machine_func set_hook get_hook get_snapshot_hook set_snapshot_hook snapshot_condition_hook
-            val node1 = part_init [] "1" "@node1" verbose
-            val node2 = part_init [node1] "2" "@node2" verbose
-            val node3 = part_init [node1, node2] "3" "@node3" verbose
-            val dialer = (fn () => dialer [node1, node2, node3])
-        in 
-            send(node1, ("ADD_NODES", [node2, node3]));
-            send(node2, ("ADD_NODES", [node3]));
-            spawn dialer
+    fun raft_d aliases state_machine_func hooks verbose =
+        let val nodes = initiate_distributed_nodes aliases state_machine_func hooks verbose
+        in spawn (fn () => dialer nodes)
     end
 
     (* Spawns a Raft network, and a dialer, which can be contacted to
     communicate with their state-machines *)
-    fun raft state_machine_func set_hook get_hook get_snapshot_hook set_snapshot_hook snapshot_condition_hook verbose =
-        let val nodes = initiate_nodes 5 state_machine_func set_hook get_hook get_snapshot_hook set_snapshot_hook snapshot_condition_hook verbose
-            val dialer = (fn () => dialer nodes)
-        in spawn dialer
+    fun raft state_machine_func hooks verbose =
+        let val nodes = initiate_nodes 5 state_machine_func hooks verbose
+        in spawn (fn () => dialer nodes)
     end
 
-    (* Application of the Raft algorithm on a key-value-store*)
-    fun key_val_store_init raft_fun verbose =
-        raft_fun key_val_store 
-            (fn x => case x of (key, value) => ("SET", (key, value))) 
-            (fn (x, callback_pid) => ("GET", (x, callback_pid)))
-            (fn (callback_pid) => ("GET_SNAPSHOT", callback_pid))
-            (fn x => ("SET_SNAPSHOT", x))
-            (fn (log_summary, callback_pid) => ("SNAPSHOT_CONDITION", (log_summary, callback_pid)))
-            verbose
-    
+    (* Application of the local Raft algorithm on a key-value-store*)
+    fun key_val_store_init verbose = raft key_val_store key_val_store_hooks verbose
+
+    (* Application of the distributed Raft algorithm on a key-value-store*)
+    fun key_val_store_init_d aliases verbose = raft_d aliases key_val_store key_val_store_hooks verbose
+    val default_aliases = ["@node1", "@node2", "@node3"]
     (* #IMPORT libs/tests.trp *)
 
-in test1_dist ()
+in test_snapshot ()
 end
