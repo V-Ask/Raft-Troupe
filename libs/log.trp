@@ -18,6 +18,17 @@
         lastMessageSerial = ""
     }
 
+    fun pretty_print_log id log = 
+        printString "\n========******========";
+        printString ("ID: "^id);
+        printString "----------------------";
+        printString "Entries (term, message):";
+        map (fn x => print (x.term, x.command)) log.log;
+        printString "----------------------";
+        printString "Snapshot:";
+        print log.snapshot;
+        printString "========******========\n"
+
     (* Appends a message to the log, and notes the message's serial number *)
     fun append_message log message term serial = 
         let val new_entry = {
@@ -115,9 +126,11 @@
 
     (* Get a snapshot of all committed entries *)
     fun get_snapshot state_machine_pid hooks log = 
-        let val lastCommitted = get_nth_command log log.commitIndex
-        in take_snapshot state_machine_pid hooks log.commitIndex lastCommitted.term
-    end
+        if log.commitIndex > 0 andalso log.commitIndex <= length log.log then
+            let val lastCommitted = get_nth_command log log.commitIndex
+            in take_snapshot state_machine_pid hooks log.commitIndex lastCommitted.term end
+        else empty_snapshot
+        
 
     (* Applies a snapshot to the log *)
     fun apply_snapshot state_machine_pid snapshot log =

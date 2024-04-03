@@ -120,7 +120,7 @@ let fun not a = a = false
                         end
                 end
                 (* A follower should never get more entries than the leader *)
-                else print node.log
+                else print "ERROR"
             end
 
             (* Convert leader to follower *)
@@ -206,14 +206,12 @@ let fun not a = a = false
                     (* If we receive AppendEntries from a leader in a higher term,
                     convert to follower *)
                     hn ("AppendEntries", x, l_id, other_term, prevIndex, prevTerm, commitIndex) when other_term > node.term => 
-                        let val _ = verbose_print (node.id^": received AppendEntries from leader, I must have lost position") node.verbose
-                        in follower (demote other_term l_id () node)
-                        end,
+                        verbose_print (node.id^": received AppendEntries from leader, I must have lost position") node.verbose;
+                        in follower (demote other_term l_id () node),
                     
                     (* Prints log *)
                     hn ("debug-printlog") =>
-                        print node.id;
-                        print node.log;
+                        pretty_print_log node.id node.log;
                         print node.leader_info;
                         loop node,
 
@@ -227,10 +225,14 @@ let fun not a = a = false
 
                     (* Applies a snapshot *)
                     hn ("debug-applysnapshot") =>
-                        let val snapshot = get_snapshot node.state_machine_pid node.hooks node.log
-                            val node = {node with log = apply_snapshot node.state_machine_pid snapshot node.log}
-                            val _ = verbose_print (node.id^": applying snapshot") node.verbose
-                        in loop node end,
+                        let 
+                            val snapshot = get_snapshot node.state_machine_pid node.hooks node.log
+                            val node = case snapshot.snapshot of
+                            () => node
+                            | _ => {node with log = apply_snapshot node.state_machine_pid snapshot node.log}
+                        in 
+                            verbose_print (node.id^": applying snapshot") node.verbose;
+                            loop node end,
 
                     (* Asks the state-machine for the snapshot condition *)
                     hn ("debug-snapshotcond") =>
@@ -443,8 +445,7 @@ let fun not a = a = false
 
                     (* Prints the log *)
                     hn ("debug-printlog") =>
-                        let val _ = print node.id
-                        in print node.log end,
+                        pretty_print_log node.id node.log,
 
                     (* Halts the follower *)
                     hn ("debug-pause") =>
@@ -581,7 +582,7 @@ let fun not a = a = false
                         leader,
 
                     hn ("SEND-TO-ALL", x) => 
-                        send_to_all cluster ("debug-printlog") (self());
+                        send_to_all cluster x (self());
                         leader,
                     hn x => leader ]
                 in loop leader end
