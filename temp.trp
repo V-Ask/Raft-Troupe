@@ -1,1 +1,4 @@
-whereis("@node1", "node")
+import stdio
+let val p_id = whereis("@node1", "node")
+in print "NOW"; sleep 2000; print (send(p_id, "dsadsafs"))
+end

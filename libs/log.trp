@@ -25,6 +25,11 @@
         printString "Entries (term, message):";
         map (fn x => print (x.term, x.command)) log.log;
         printString "----------------------";
+        printString "CommitIndex:";
+        print log.commitIndex;
+        printString "LastApplied:";
+        print log.lastApplied;
+        printString "----------------------";
         printString "Snapshot:";
         print log.snapshot;
         printString "========******========\n"
@@ -126,9 +131,11 @@
 
     (* Get a snapshot of all committed entries *)
     fun get_snapshot state_machine_pid hooks log = 
-        if log.commitIndex > 0 andalso log.commitIndex <= length log.log then
+        if log.commitIndex > 0 andalso 
+        (log.commitIndex - log.snapshot.lastIncludedIndex) <= length log.log then
             let val lastCommitted = get_nth_command log log.commitIndex
-            in take_snapshot state_machine_pid hooks log.commitIndex lastCommitted.term end
+                val snapshot = take_snapshot state_machine_pid hooks log.commitIndex lastCommitted.term
+            in snapshot end
         else empty_snapshot
         
 

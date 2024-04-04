@@ -1,4 +1,5 @@
 import lists
+import stdio
 import quickselect
 
 (*
@@ -145,7 +146,7 @@ let fun not a = a = false
                 in { node with log = snapshot_log }
                 end
             val nonce = mkuuid ()
-            fun loop node = let val node = apply_committed node
+            fun loop node = let val node = node
                 in receive [
                     hn ("SEND_HEARTBEAT", x) when nonce = x =>
                         let val _ = verbose_print (node.id^": Sending heartbeat") node.verbose
@@ -178,7 +179,7 @@ let fun not a = a = false
                     hn ("ACKNOWLEGDE", (peer, logIndex)) => 
                         let val node = { node with leader_info = update_match_index node.leader_info peer logIndex }
                             val node = { node with leader_info = update_next_index node.leader_info peer (logIndex + 1) }
-                        in loop node end,
+                        in loop (apply_committed node) end,
                     
                     (* If append is unsuccessful *)
                     hn ("REJECT", (peer, terminfo, logIndex)) => 
@@ -469,7 +470,7 @@ let fun not a = a = false
     
     (* Defines a default node, being a follower in term 1 without a leader and
     the state-machine in its beginning state *)
-    fun default_node id hooks verbose all_nodes state_machine_pid = 
+    fun default_node id hooks all_nodes verbose state_machine_pid = 
         let val node = {
             all_nodes = all_nodes,
             id = id,
@@ -482,13 +483,13 @@ let fun not a = a = false
             hooks = hooks,
             verbose = verbose
         }
-        in fn() => follower node
+        in fn() => printString (id^": Starting node..."); follower node
     end
 
     (* Spawn a state-machine on a seperate thread, creates a record*)
     fun initiate_node state_machine_func hooks id verbose = 
         let val state_machine_pid = spawn state_machine_func
-        in spawn (default_node id hooks verbose [] state_machine_pid)
+        in spawn (default_node id hooks [] verbose state_machine_pid)
     end
 
     (* Sends a list of all nodes to all nodes *)
@@ -512,23 +513,23 @@ let fun not a = a = false
     end
 
     (* Spawn a state-machine on some alias *)
-    fun initiate_distributed_node state_machine hooks id p_id p_ids verbose = 
-        let val part_default = default_node id hooks verbose p_ids
-        in 
-            send(p_id, ("RAFT-INIT", (state_machine, part_default)));
-            p_id
+    fun initiate_distributed_node state_machine hooks id alias verbose = 
+        let val state_machine_pid = spawn(alias, state_machine)
+        in spawn(alias, (default_node id hooks [] verbose state_machine_pid))
+
     end
 
     fun initiate_distributed_nodes aliases state_machine hooks verbose =
-        let val p_ids = map (fn x => whereis(x, "node")) aliases
-            val part_init = initiate_distributed_node state_machine hooks
+        let val part_init = initiate_distributed_node state_machine hooks
             fun spawn_nodes acc acc_id =
                 case acc of 
                 [] => []
                 | h :: t =>
-                    append (spawn_nodes t (acc_id ^ "I")) [part_init acc_id h p_ids verbose]
-            val nodes = spawn_nodes p_ids "I"
-        in nodes
+                    append (spawn_nodes t (acc_id ^ "I")) [part_init acc_id h verbose]
+            val nodes = spawn_nodes aliases "I"
+        in 
+            add_refs nodes;
+            nodes
     end
                     
     (* Facilitates client-side interaction to the Raft cluster *)
@@ -612,5 +613,5 @@ let fun not a = a = false
     val default_aliases = ["@node1", "@node2", "@node3"]
     (* #IMPORT libs/tests.trp *)
 
-in key_val_store_init_d default_aliases true
+in test_lots_of_messages (fn () => key_val_store_init_d default_aliases true)
 end

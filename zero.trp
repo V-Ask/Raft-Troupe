@@ -1,6 +1,1 @@
-let val (state_machine, raft) = 
-        register ("node", self(), authority); 
-        receive [hn ("RAFT-INIT", x) => x]
-    val state_machine_pid = spawn state_machine
-in (raft state_machine_pid) ()
-end
+0
