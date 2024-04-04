@@ -76,10 +76,285 @@ let fun not a = a = false
     fun min a b = if a > b then b else a
 
     (* #IMPORT libs/log.trp *)
+    (* Creates a snapshot *)
+    fun set_snapshot snapshot index term = {
+        snapshot = snapshot,
+        lastIncludedIndex = index,
+        lastIncludedTerm = term
+    }
+
+    (* Creates a default, empty snapshot *)
+    val empty_snapshot = set_snapshot () 0 0
+
+    (* A default, empty log*)
+    val empty_log = {
+        log = [],
+        snapshot = empty_snapshot,
+        lastApplied = 0,
+        commitIndex = 0,
+        lastMessageSerial = ""
+    }
+
+    fun pretty_print_log id log = 
+        printString "\n========******========";
+        printString ("ID: "^id);
+        printString "----------------------";
+        printString "Entries (term, message):";
+        map (fn x => print (x.term, x.command)) log.log;
+        printString "----------------------";
+        printString "Snapshot:";
+        print log.snapshot;
+        printString "========******========\n"
+
+    (* Appends a message to the log, and notes the message's serial number *)
+    fun append_message log message term serial = 
+        let val new_entry = {
+            term = term,
+            command = message,
+            serial = serial
+        }
+        in {
+            log with
+            lastMessageSerial = serial, 
+            log = new_entry :: log.log
+        } 
+    end
+
+    (* Appends a list of message to the log *)
+    fun add_entries_to_log log entries term =
+        case entries of
+        [] => log
+        | h :: t => 
+            add_entries_to_log (append_message log h.command term h.serial) t h.term
+
+    (* Updates the lastApplied-index*)
+    fun update_applied log = {
+        log with
+        lastApplied = log.lastApplied + 1
+    }
+    
+    (* Commits a message in the log *)
+    fun update_commit log new_index = {
+       log with 
+       commitIndex = (max new_index log.commitIndex)
+    }
+
+    (* Rolls the log back one entry*)
+    fun rollback_log log =
+        let val (_ :: prev_log) = log.log
+    in {
+        log with 
+        log = prev_log
+    }
+    end
+    
+    (* Get the entry of the latest log entry *)
+    fun get_log_index log = (length log.log) + log.snapshot.lastIncludedIndex
+
+    (* Rolls the log back n time *)
+    fun rollback_log_to log n = 
+        if n < (get_log_index log) then
+            let val log = rollback_log log
+            in (rollback_log_to log n)
+        end
+        else log
+
+    (* Get the term of the latest entry of the log, or, if empty, the last
+    included index of the snapshot*)
+    fun get_latest_entry_term log =
+        case log.log of
+        [] => log.snapshot.lastIncludedTerm
+        | h :: _ => h.term
+
+    fun get_latest_log_term log = get_latest_entry_term log
+
+    fun get_latest_log_command log = 
+        case log.log of
+        [] => 0 (* Should not be reachable*)
+        | h :: _ => h.command
+
+    fun get_nth_command log index = nth (reverse log.log) (index - log.snapshot.lastIncludedIndex) 
+
+    (* Returns a slice of all entries after log-index n *)
+    fun get_commands_after_nth log n =
+        let val log_slice = slice (n - log.snapshot.lastIncludedIndex) (length log.log) (reverse log.log)
+        in log_slice
+        end
+
+    (* Returns a slice of all entries after the commit-index *)
+    fun uncommitted_entries log = get_commands_after_nth log log.commitIndex
+
+    (* Applies all log-entries that have been committed, but not applied *)
+    fun apply_log log f = if log.lastApplied < log.commitIndex 
+        then 
+            let val _ = f ((get_nth_command log (log.lastApplied + 1)).command) 
+            val log = update_applied log
+            in apply_log log f end
+        else log
+    
+    (* Receive a snapshot of the state-machine's current state *)
+    fun take_snapshot state_machine_pid hooks index term = 
+        let val pid = self()
+            val state = 
+                send (state_machine_pid, (hooks.snapshot_gethook pid)); 
+                receive[hn ("SNAPSHOT", x) => x]
+        in set_snapshot state index term
+    end
+
+    (* Get a snapshot of all committed entries *)
+    fun get_snapshot state_machine_pid hooks log = 
+        if log.commitIndex > 0 andalso log.commitIndex <= length log.log then
+            let val lastCommitted = get_nth_command log log.commitIndex
+            in take_snapshot state_machine_pid hooks log.commitIndex lastCommitted.term end
+        else empty_snapshot
+        
+
+    (* Applies a snapshot to the log *)
+    fun apply_snapshot state_machine_pid snapshot log =
+        let val uncommitted_entries = uncommitted_entries log
+            val newCommitIndex =
+                if log.commitIndex < snapshot.lastIncludedIndex then snapshot.lastIncludedIndex
+                else log.commitIndex
+            val newLastApplied =
+                if log.lastApplied < snapshot.lastIncludedIndex then snapshot.lastIncludedIndex
+                else log.lastApplied
+        in  send(state_machine_pid, snapshot.snapshot);
+            { log with 
+                log = uncommitted_entries,
+                commitIndex = newCommitIndex,
+                lastApplied = newLastApplied,
+                snapshot = snapshot }
+    end
+
+    (* Generates a summary of the log containing the amount of committed
+    entries, and the number of entries since the last Snapshot *)
+    fun generate_summary log = 
+        {applied_log_size = log.lastApplied, 
+            entries_since_snap = (log.lastApplied - log.snapshot.lastIncludedIndex)}
+
+    (* Asks the state-machine whether or not to snapshot *)
+    fun evaluate_snapshot_cond state_machine_pid hooks log = 
+        let val p_id = self ()
+            val summary = generate_summary log
+        in 
+            send(state_machine_pid, (hooks.snapshot_condition_hook (summary, p_id)));
+            receive [
+                hn ("SNAPSHOT-CALLBACK", callback) => 
+                    if callback then apply_snapshot state_machine_pid (get_snapshot state_machine_pid hooks log) log
+                    else log
+            ]
+    end
+    (* END OF libs/log.trp *)
 
     (* #IMPORT libs/key-val.trp *)
+    fun key_val_store () = 
+        let fun remove element list = 
+            case list of 
+            [] => []
+            | h :: t => 
+                if h = element then t
+                else append [h] (remove element t)
+        fun get_record key dic =
+            case dic of
+                [] => ()
+                | h :: t => 
+                    if h.key = key then h
+                    else get_record key t
+        fun get key dic = 
+            let val record = get_record key dic
+            in if record = () then ()
+                else record.value
+            end
+        fun set (key, value) dic = 
+            let val existing_record = get_record key dic 
+                val new_record = {key = key, value = value}
+            in if existing_record = () then 
+                append [{key = key, value = value}] dic
+            else 
+                if new_record = existing_record then dic
+                else append [new_record] (remove existing_record dic)
+            end
+        fun drop key dic = 
+            remove (get_record key dic) dic
+        val dic = []
+        fun loop dic = 
+            let val dic = receive [
+                hn ("SET", (key, value)) => set (key, value) dic,
+                hn ("GET", (key, sender_id)) => 
+                    let val _ = send(sender_id, ("RESPONSE", (get key dic)))
+                    in dic
+                    end,
+                hn ("GET_SNAPSHOT", sender_id) => 
+                    let val _ = send(sender_id, ("SNAPSHOT", dic))
+                    in dic
+                    end,
+                hn ("SET_SNAPSHOT", other_dic) => loop other_dic,
+                hn ("SNAPSHOT_CONDITION", (log_summary, sender_id)) => 
+                    let val callback = log_summary.applied_log_size > (length dic) 
+                        andalso log_summary.entries_since_snap > 50
+                    in 
+                        send(sender_id, ("SNAPSHOT-CALLBACK", callback));
+                        loop dic end,
+                hn ("DROP", key) => drop key dic
+            ]
+            in loop dic
+            end
+        in loop dic
+    end
+
+    val key_val_store_hooks = 
+        {sethook = (fn x => case x of (key, value) => ("SET", (key, value))), 
+            gethook = (fn (x, callback_pid) => ("GET", (x, callback_pid))), 
+            snapshot_gethook = (fn (callback_pid) => ("GET_SNAPSHOT", callback_pid)),
+            snapshot_sethook = (fn x => ("SET_SNAPSHOT", x)),
+            snapshot_condition_hook = (fn (log_summary, callback_pid) => ("SNAPSHOT_CONDITION", (log_summary, callback_pid)))}
+    (* END OF libs/key-val.trp *)
 
     (* #IMPORT libs/leader-info.trp *)
+
+    (* Generates a default leader info, with the nextIndex of all followers
+    being the nextIndex of the new leader. This can be changed with followers
+    rejecting AppendEntries *)
+    fun new_leader all_nodes log = 
+        let val nextIndex = get_log_index log
+            val index = map (fn id => {peer = id, next = nextIndex + 1}) all_nodes
+            val match_index = map (fn id => {peer = id, match = 0}) all_nodes
+        in {
+            nextIndex = index,
+            matchIndex = match_index
+        } end
+    
+    (* Get the nextIndex of a peer *)
+    fun get_next_index leader_info peer = first (filter (fn (x) => x.peer = peer) leader_info.nextIndex)
+
+    (* Get the matchIndex of a peer *)
+    fun get_match_index leader_info peer = first (filter (fn (x) => x.peer = peer) leader_info.matchIndex)
+
+    fun update_next_index leader_info peer new = let
+        val prevIndex = get_next_index leader_info peer
+        val newIndex = {peer = peer, next = new}
+        val withoutPeer = filter (fn (x) => x.peer <> peer) leader_info.nextIndex
+    in {
+        leader_info with 
+        nextIndex = newIndex :: withoutPeer
+    } end
+
+    fun update_match_index leader_info peer new = let
+        val prevIndex = get_match_index leader_info peer
+        val newIndex = {peer = peer, match = new}
+        val witoutPeer = filter (fn (x) => x.peer <> peer) leader_info.matchIndex
+    in {
+        leader_info with 
+        matchIndex = newIndex :: witoutPeer
+    } end
+
+    (* Get all follower's matchIndex*)
+    fun get_matches leader_info = map (fn x => x.match) leader_info.matchIndex
+
+    (* Get the highest index of entries that a majority of followers have
+    appended to, by finding the median *)
+    fun calc_highest_commit matches = median matches
+    (* END OF libs/leader-info.trp *)
 
     fun verbose_print x verbose = if verbose then print x else ()
 
@@ -352,7 +627,7 @@ let fun not a = a = false
                         let val latestLogIndex = get_log_index node.log
                             val latestLogTerm = get_latest_log_term node.log
                             fun no_vote () =
-                                send(c_id, "NO-VOTE");
+                                send(p_id, "NO-VOTE");
                                 verbose_print (node.id^":voting no") node.verbose;
                                 follower node
                             fun yes_vote () =
@@ -611,6 +886,142 @@ let fun not a = a = false
     fun key_val_store_init_d aliases verbose = raft_d aliases key_val_store key_val_store_hooks verbose
     val default_aliases = ["@node1", "@node2", "@node3"]
     (* #IMPORT libs/tests.trp *)
+    fun send_delay (to, m) delay =
+        sleep delay;
+        send (to, m)
+
+    fun send_n_updates raft n =
+        let fun loop n =
+            send(raft, ("RAFT-UPDATE", ("TEST", "TEST")));
+            print n;
+            sleep 10;
+            if n > 1 then loop (n - 1) else () 
+        in loop n 
+    end
+
+    fun send_n_unique_updates raft n =
+        let fun loop n =
+            send(raft, ("RAFT-UPDATE", (mkuuid(), "TEST")));
+            print n;
+            sleep 10;
+            if n > 1 then loop (n - 1) else ()
+        in loop n
+    end
+
+    fun assert_equals a b =
+        if a = b then ()
+        else print "Assertion Error, expected"; print a; print "Actual:"; print b
+
+    fun test1_local () = 
+        let val raft = key_val_store_init true
+        in
+            send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
+            send_delay(raft, ("RAFT-UPDATE", ("Hello", "There"))) 500;
+            send_delay(raft, ("SEND-TO-NTH", 1, "debug-pause")) 1000;
+            print "killing I";
+            send_delay(raft, ("RAFT-UPDATE", ("Hello", "World"))) 500;
+            send_delay(raft, ("SEND-TO-NTH", 1, "debug-continue")) 8000;
+            print "reviving I";
+            send(raft, ("SEND-TO-NTH", 1, ("RAFT-UPDATE", ("Hello", "Other World"))));
+            send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 2000
+    end
+
+    fun test2_local () = 
+        let val raft = key_val_store_init true
+        in 
+            send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
+            send(raft, ("SEND-TO-NTH", 2, "debug-timeout"));
+            send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 1000
+    end
+
+    fun test3_local () = 
+        let val p_id = self()
+            val raft = key_val_store_init true
+        in 
+            send_delay(raft, ("RAFT-UPDATE", ("A", 42))) 2000;
+            send_delay(raft, ("RAFT-GET", ("A", p_id))) 1000;
+            receive [hn x => print x]
+    end
+
+    fun test4_local () = 
+        let val raft = key_val_store_init true
+        in
+            send_delay(raft, ("RAFT-UPDATE", ("Hello", "There"))) 2000;
+            send_delay(raft, ("RAFT-UPDATE", ("Hello", "There"))) 1000;
+            send_delay(raft, ("RAFT-UPDATE", ("Hello", "There"))) 1000;
+            send_delay(raft, ("RAFT-UPDATE", ("Hello", "There"))) 1000;
+            send_delay(raft, ("RAFT-UPDATE", ("Hello", "There"))) 1000;
+            send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 4000
+    end
+
+    fun test5_local () =
+        let val raft = key_val_store_init true
+        in
+            send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
+            send_n_updates raft 51;
+            send_delay(raft, ("SEND-TO-NTH", 1, "debug-snapshotcond")) 5000
+    end
+
+    fun test6_local () = 
+        let val raft = key_val_store_init true 
+        in 
+            send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
+            send_delay(raft, ("RAFT-UPDATE", ("A", 2))) 1000;
+            send_delay(raft, ("RAFT-UPDATE", ("A", 3))) 500;
+            send_delay(raft, ("RAFT-UPDATE", ("A", 4))) 10;
+            send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 5000
+    end
+
+    fun test_snapshot () =
+        let val raft = key_val_store_init true
+        in 
+            send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
+            send_delay(raft, ("SEND-TO-NTH", 3, "debug-pause")) 100;
+            print "sending 1";
+            send(raft, ("RAFT-UPDATE", ("A", 1)));
+            print "sending 2";
+            send_delay(raft, ("RAFT-UPDATE", ("A", 2))) 50;
+            print "sending 3";
+            send_delay(raft, ("RAFT-UPDATE", ("A", 4))) 50;
+            send_delay(raft, ("SEND-TO-NTH", 1, "debug-printlog")) 1000;
+            send_delay(raft, ("SEND-TO-NTH", 1, "debug-applysnapshot")) 1000;
+            send_delay(raft, ("SEND-TO-NTH", 1, "debug-printlog")) 1000
+    end
+
+    fun test_lots_of_messages () = 
+        let val raft = key_val_store_init true 
+        in 
+            send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
+            sleep 1000;
+            send_n_updates raft 1000;
+            send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 5000
+    end
+
+    fun test_lots_of_unique_messages () = 
+        let val raft = key_val_store_init true
+        in
+            sleep 5000;
+            send_n_unique_updates raft 5;
+            send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 1000
+    end
+
+    fun test1_dist () = 
+        let val raft = key_val_store_init_d default_aliases true
+            val p_id = self()
+        in
+            send_delay (raft, ("RAFT-UPDATE", ("A", 42))) 2000;
+            send_delay (raft, ("RAFT-GET", ("A", p_id))) 2000;
+            receive [hn x => print x]
+    end
+
+    fun test2_dist () = 
+        let val raft = key_val_store_init_d default_aliases true
+        in 
+            send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
+            send(raft, ("SEND-TO-NTH", 2, "debug-timeout"));
+            send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 1000
+    end
+    (* END OF libs/tests.trp *)
 
 in key_val_store_init_d default_aliases true
 end

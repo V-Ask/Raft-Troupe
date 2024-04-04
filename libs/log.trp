@@ -1,0 +1,170 @@
+    (* EXPORT START *)
+    (* Creates a snapshot *)
+    fun set_snapshot snapshot index term = {
+        snapshot = snapshot,
+        lastIncludedIndex = index,
+        lastIncludedTerm = term
+    }
+
+    (* Creates a default, empty snapshot *)
+    val empty_snapshot = set_snapshot () 0 0
+
+    (* A default, empty log*)
+    val empty_log = {
+        log = [],
+        snapshot = empty_snapshot,
+        lastApplied = 0,
+        commitIndex = 0,
+        lastMessageSerial = ""
+    }
+
+    fun pretty_print_log id log = 
+        printString "\n========******========";
+        printString ("ID: "^id);
+        printString "----------------------";
+        printString "Entries (term, message):";
+        map (fn x => print (x.term, x.command)) log.log;
+        printString "----------------------";
+        printString "Snapshot:";
+        print log.snapshot;
+        printString "========******========\n"
+
+    (* Appends a message to the log, and notes the message's serial number *)
+    fun append_message log message term serial = 
+        let val new_entry = {
+            term = term,
+            command = message,
+            serial = serial
+        }
+        in {
+            log with
+            lastMessageSerial = serial, 
+            log = new_entry :: log.log
+        } 
+    end
+
+    (* Appends a list of message to the log *)
+    fun add_entries_to_log log entries term =
+        case entries of
+        [] => log
+        | h :: t => 
+            add_entries_to_log (append_message log h.command term h.serial) t h.term
+
+    (* Updates the lastApplied-index*)
+    fun update_applied log = {
+        log with
+        lastApplied = log.lastApplied + 1
+    }
+    
+    (* Commits a message in the log *)
+    fun update_commit log new_index = {
+       log with 
+       commitIndex = (max new_index log.commitIndex)
+    }
+
+    (* Rolls the log back one entry*)
+    fun rollback_log log =
+        let val (_ :: prev_log) = log.log
+    in {
+        log with 
+        log = prev_log
+    }
+    end
+    
+    (* Get the entry of the latest log entry *)
+    fun get_log_index log = (length log.log) + log.snapshot.lastIncludedIndex
+
+    (* Rolls the log back n time *)
+    fun rollback_log_to log n = 
+        if n < (get_log_index log) then
+            let val log = rollback_log log
+            in (rollback_log_to log n)
+        end
+        else log
+
+    (* Get the term of the latest entry of the log, or, if empty, the last
+    included index of the snapshot*)
+    fun get_latest_entry_term log =
+        case log.log of
+        [] => log.snapshot.lastIncludedTerm
+        | h :: _ => h.term
+
+    fun get_latest_log_term log = get_latest_entry_term log
+
+    fun get_latest_log_command log = 
+        case log.log of
+        [] => 0 (* Should not be reachable*)
+        | h :: _ => h.command
+
+    fun get_nth_command log index = nth (reverse log.log) (index - log.snapshot.lastIncludedIndex) 
+
+    (* Returns a slice of all entries after log-index n *)
+    fun get_commands_after_nth log n =
+        let val log_slice = slice (n - log.snapshot.lastIncludedIndex) (length log.log) (reverse log.log)
+        in log_slice
+        end
+
+    (* Returns a slice of all entries after the commit-index *)
+    fun uncommitted_entries log = get_commands_after_nth log log.commitIndex
+
+    (* Applies all log-entries that have been committed, but not applied *)
+    fun apply_log log f = if log.lastApplied < log.commitIndex 
+        then 
+            let val _ = f ((get_nth_command log (log.lastApplied + 1)).command) 
+            val log = update_applied log
+            in apply_log log f end
+        else log
+    
+    (* Receive a snapshot of the state-machine's current state *)
+    fun take_snapshot state_machine_pid hooks index term = 
+        let val pid = self()
+            val state = 
+                send (state_machine_pid, (hooks.snapshot_gethook pid)); 
+                receive[hn ("SNAPSHOT", x) => x]
+        in set_snapshot state index term
+    end
+
+    (* Get a snapshot of all committed entries *)
+    fun get_snapshot state_machine_pid hooks log = 
+        if log.commitIndex > 0 andalso log.commitIndex <= length log.log then
+            let val lastCommitted = get_nth_command log log.commitIndex
+            in take_snapshot state_machine_pid hooks log.commitIndex lastCommitted.term end
+        else empty_snapshot
+        
+
+    (* Applies a snapshot to the log *)
+    fun apply_snapshot state_machine_pid snapshot log =
+        let val uncommitted_entries = uncommitted_entries log
+            val newCommitIndex =
+                if log.commitIndex < snapshot.lastIncludedIndex then snapshot.lastIncludedIndex
+                else log.commitIndex
+            val newLastApplied =
+                if log.lastApplied < snapshot.lastIncludedIndex then snapshot.lastIncludedIndex
+                else log.lastApplied
+        in  send(state_machine_pid, snapshot.snapshot);
+            { log with 
+                log = uncommitted_entries,
+                commitIndex = newCommitIndex,
+                lastApplied = newLastApplied,
+                snapshot = snapshot }
+    end
+
+    (* Generates a summary of the log containing the amount of committed
+    entries, and the number of entries since the last Snapshot *)
+    fun generate_summary log = 
+        {applied_log_size = log.lastApplied, 
+            entries_since_snap = (log.lastApplied - log.snapshot.lastIncludedIndex)}
+
+    (* Asks the state-machine whether or not to snapshot *)
+    fun evaluate_snapshot_cond state_machine_pid hooks log = 
+        let val p_id = self ()
+            val summary = generate_summary log
+        in 
+            send(state_machine_pid, (hooks.snapshot_condition_hook (summary, p_id)));
+            receive [
+                hn ("SNAPSHOT-CALLBACK", callback) => 
+                    if callback then apply_snapshot state_machine_pid (get_snapshot state_machine_pid hooks log) log
+                    else log
+            ]
+    end
+    (* EXPORT END *)
