@@ -121,7 +121,7 @@ let
     end
 
     fun test1_dist () = 
-        let val raft = key_val_store_init_d raft_d true
+        let val raft = key_val_store_init_d default_aliases true
             val p_id = self()
         in
             send_delay (raft, ("RAFT-UPDATE", ("A", 42))) 2000;
@@ -130,7 +130,7 @@ let
     end
 
     fun test2_dist () = 
-        let val raft = key_val_store_init_d raft_d true
+        let val raft = key_val_store_init_d default_aliases true
         in 
             send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
             send(raft, ("SEND-TO-NTH", 2, "debug-timeout"));

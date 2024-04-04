@@ -204,8 +204,8 @@ let fun not a = a = false
     (* Get a snapshot of all committed entries *)
     fun get_snapshot state_machine_pid hooks log = 
         if log.commitIndex > 0 andalso log.commitIndex <= length log.log then
-            let val lastCommitted = print log.commitIndex; get_nth_command log log.commitIndex
-            in print log.commitIndex; take_snapshot state_machine_pid hooks log.commitIndex lastCommitted.term end
+            let val lastCommitted = get_nth_command log log.commitIndex
+            in take_snapshot state_machine_pid hooks log.commitIndex lastCommitted.term end
         else empty_snapshot
         
 
@@ -481,9 +481,8 @@ let fun not a = a = false
                     (* If we receive AppendEntries from a leader in a higher term,
                     convert to follower *)
                     hn ("AppendEntries", x, l_id, other_term, prevIndex, prevTerm, commitIndex) when other_term > node.term => 
-                        let val _ = verbose_print (node.id^": received AppendEntries from leader, I must have lost position") node.verbose
-                        in follower (demote other_term l_id () node)
-                        end,
+                        verbose_print (node.id^": received AppendEntries from leader, I must have lost position") node.verbose;
+                        follower (demote other_term l_id () node),
                     
                     (* Prints log *)
                     hn ("debug-printlog") =>
@@ -670,9 +669,10 @@ let fun not a = a = false
 
                             val node = {node with term = (if node.term < leader_term then leader_term else node.term)}
                             
-                            val _ = if accepting then ack ()
-                                    else reject ()
-                        in follower {node with log = newlog}
+                        in 
+                            (if accepting then ack ()
+                                    else reject ());
+                            follower {node with log = newlog}
                         end,
 
                     (* When receiving entries from a leader in a later or
@@ -744,9 +744,9 @@ let fun not a = a = false
     
     (* Defines a default node, being a follower in term 1 without a leader and
     the state-machine in its beginning state *)
-    fun default_node state_machine_pid id hooks verbose = 
+    fun default_node id hooks verbose all_nodes state_machine_pid = 
         let val node = {
-            all_nodes = [],
+            all_nodes = all_nodes,
             id = id,
             log = empty_log,
             term = 1,
@@ -763,7 +763,7 @@ let fun not a = a = false
     (* Spawn a state-machine on a seperate thread, creates a record*)
     fun initiate_node state_machine_func hooks id verbose = 
         let val state_machine_pid = spawn state_machine_func
-        in spawn (default_node state_machine_pid id hooks verbose)
+        in spawn (default_node id hooks verbose [] state_machine_pid)
     end
 
     (* Sends a list of all nodes to all nodes *)
@@ -787,23 +787,23 @@ let fun not a = a = false
     end
 
     (* Spawn a state-machine on some alias *)
-    fun initiate_distributed_node state_machine hooks id alias verbose = 
-        let val state_machine_pid = spawn(alias, state_machine)
-        in spawn(alias, (default_node state_machine_pid id hooks verbose))
+    fun initiate_distributed_node state_machine hooks id p_id p_ids verbose = 
+        let val part_default = default_node id hooks verbose p_ids
+        in 
+            send(p_id, ("RAFT-INIT", (state_machine, part_default)));
+            p_id
     end
 
     fun initiate_distributed_nodes aliases state_machine hooks verbose =
-        let val part_init = initiate_distributed_node state_machine hooks
+        let val p_ids = map (fn x => whereis(x, "node")) aliases
+            val part_init = initiate_distributed_node state_machine hooks
             fun spawn_nodes acc acc_id =
                 case acc of 
                 [] => []
-                | alias :: t =>
-                    append (spawn_nodes (t (acc_id ^ "I"))) [part_init acc_id alias verbose]
-
-            val nodes = spawn_nodes aliases "I"
-        in
-            add_refs nodes;
-            nodes
+                | h :: t =>
+                    append (spawn_nodes t (acc_id ^ "I")) [part_init acc_id h p_ids verbose]
+            val nodes = spawn_nodes p_ids "I"
+        in nodes
     end
                     
     (* Facilitates client-side interaction to the Raft cluster *)
@@ -1006,7 +1006,7 @@ let fun not a = a = false
     end
 
     fun test1_dist () = 
-        let val raft = key_val_store_init_d raft_d true
+        let val raft = key_val_store_init_d default_aliases true
             val p_id = self()
         in
             send_delay (raft, ("RAFT-UPDATE", ("A", 42))) 2000;
@@ -1015,7 +1015,7 @@ let fun not a = a = false
     end
 
     fun test2_dist () = 
-        let val raft = key_val_store_init_d raft_d true
+        let val raft = key_val_store_init_d default_aliases true
         in 
             send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
             send(raft, ("SEND-TO-NTH", 2, "debug-timeout"));
@@ -1023,5 +1023,5 @@ let fun not a = a = false
     end
     (* END OF libs/tests.trp *)
 
-in test_snapshot ()
+in key_val_store_init_d default_aliases true
 end

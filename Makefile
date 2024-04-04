@@ -12,11 +12,11 @@ build/node_dest.trp: node.trp libs/log.trp libs/leader-info.trp libs/key-val.trp
 	python build.py node.trp
 
 zero.listener1:
-	$(START) zero.trp --id=ids/node1.json --rspawn=true --aliases=aliases.json --stdiolev={} # --debug --debugp2p
+	$(START) zero.trp --id=ids/node1.json --aliases=aliases.json --stdiolev={} # --debug --debugp2p
 zero.listener2:
-	$(START) zero.trp --id=ids/node2.json --rspawn=true --aliases=aliases.json --stdiolev={} # --debug --debugp2p
+	$(START) zero.trp --id=ids/node2.json --aliases=aliases.json --stdiolev={} # --debug --debugp2p
 zero.listener3:
-	$(START) zero.trp --id=ids/node3.json --rspawn=true --aliases=aliases.json --stdiolev={} # --debug --debugp2p
+	$(START) zero.trp --id=ids/node3.json --aliases=aliases.json --stdiolev={} # --debug --debugp2p
 
 raft.dialer: build/node_dest.trp
 	$(START) ./build/node_dest.trp --id=ids/raft-dialer.json --aliases=aliases.json # --debug --debugp2p
