@@ -60,8 +60,9 @@ import quickselect
         voted_for: string,
         leader: string,
         leader_info: LeaderInfo,
-        state_machine_pid
+        state_machine_pid,
         hooks: StateMachine,
+        total_nodes: int,
         verbose: boolean
     }
 *)
@@ -334,10 +335,6 @@ let fun not a = a = false
                     in candidate ({node with term = node.term + 1})
                     end
                 val _ = receive [
-                    (* Adds a node to the cluster, only used for initialization *)
-                    hn ("ADD_NODES", x) => 
-                        follower ({node with all_nodes = append node.all_nodes x}),
-                    
                     (* Starts an election *)
                     hn ("ELECTION-TIMEOUT", x) when x = nonce => start_election (),
 
@@ -467,10 +464,19 @@ let fun not a = a = false
         end
         in loop node
     end
+
+    fun dormant_node node =
+        if length(node.all_nodes) < node.node_amount then
+            receive [
+                (* Adds a node to the cluster, only used for initialization *)
+                hn ("ADD_NODES", x) => 
+                    dormant_node ({node with all_nodes = append node.all_nodes x})
+            ]
+        else follower node
     
     (* Defines a default node, being a follower in term 1 without a leader and
     the state-machine in its beginning state *)
-    fun default_node id hooks all_nodes verbose state_machine_pid = 
+    fun default_node id hooks all_nodes node_amount verbose state_machine_pid = 
         let val node = {
             all_nodes = all_nodes,
             id = id,
@@ -481,15 +487,16 @@ let fun not a = a = false
             leader_info = (),
             state_machine_pid = state_machine_pid,
             hooks = hooks,
+            node_amount = node_amount,
             verbose = verbose
         }
-        in fn() => printString (id^": Starting node..."); follower node
+        in fn() => printString (id^": Starting node..."); dormant_node node
     end
 
     (* Spawn a state-machine on a seperate thread, creates a record*)
-    fun initiate_node state_machine_func hooks id verbose = 
+    fun initiate_node state_machine_func hooks node_amount id verbose = 
         let val state_machine_pid = spawn state_machine_func
-        in spawn (default_node id hooks [] verbose state_machine_pid)
+        in spawn (default_node id hooks [] node_amount verbose state_machine_pid)
     end
 
     (* Sends a list of all nodes to all nodes *)
@@ -498,7 +505,7 @@ let fun not a = a = false
     
     (* Spawn n nodes*)
     fun initiate_nodes n state_machine hooks verbose =
-        let val part_init = initiate_node state_machine hooks
+        let val part_init = initiate_node state_machine hooks n
             fun spawn_nodes n acc_id =
                 case n of
                 0 => []
@@ -513,14 +520,14 @@ let fun not a = a = false
     end
 
     (* Spawn a state-machine on some alias *)
-    fun initiate_distributed_node state_machine hooks id alias verbose = 
+    fun initiate_distributed_node state_machine hooks node_amount id alias verbose = 
         let val state_machine_pid = spawn(alias, state_machine)
-        in spawn(alias, (default_node id hooks [] verbose state_machine_pid))
+        in spawn(alias, (default_node id hooks [] node_amount verbose state_machine_pid))
 
     end
 
     fun initiate_distributed_nodes aliases state_machine hooks verbose =
-        let val part_init = initiate_distributed_node state_machine hooks
+        let val part_init = initiate_distributed_node state_machine hooks (length(aliases))
             fun spawn_nodes acc acc_id =
                 case acc of 
                 [] => []
@@ -576,6 +583,7 @@ let fun not a = a = false
                 let val leader = receive [
                     hn ("RAFT-UPDATE", x) =>
                         update_message x leader,
+
                     hn ("RAFT-GET", x) =>
                         get_message x leader,
 
@@ -613,5 +621,5 @@ let fun not a = a = false
     val default_aliases = ["@node1", "@node2", "@node3"]
     (* #IMPORT libs/tests.trp *)
 
-in test_lots_of_messages (fn () => key_val_store_init_d default_aliases true)
+in test1 (fn () => key_val_store_init_d default_aliases true) 
 end
