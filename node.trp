@@ -608,18 +608,18 @@ let fun not a = a = false
 
     (* Spawns a Raft network, and a dialer, which can be contacted to
     communicate with their state-machines *)
-    fun raft state_machine_func hooks verbose =
-        let val nodes = initiate_nodes 5 state_machine_func hooks verbose
+    fun raft n state_machine_func hooks verbose =
+        let val nodes = initiate_nodes n state_machine_func hooks verbose
         in spawn (fn () => dialer nodes)
     end
 
     (* Application of the local Raft algorithm on a key-value-store*)
-    fun key_val_store_init verbose = raft key_val_store key_val_store_hooks verbose
+    fun key_val_store_init n verbose = raft n key_val_store key_val_store_hooks verbose
 
     (* Application of the distributed Raft algorithm on a key-value-store*)
     fun key_val_store_init_d aliases verbose = raft_d aliases key_val_store key_val_store_hooks verbose
     val default_aliases = ["@node1", "@node2", "@node3"]
     (* #IMPORT libs/tests.trp *)
 
-in test1 (fn () => key_val_store_init_d default_aliases true) 
+in test_lots_of_messages (fn () => key_val_store_init 5 true) 
 end
