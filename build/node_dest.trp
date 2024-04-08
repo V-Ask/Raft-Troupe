@@ -1026,5 +1026,5 @@ let fun not a = a = false
 
     (* END OF libs/tests.trp *)
 
-in test_lots_of_messages (fn () => key_val_store_init 10 true) 
+in test_lots_of_messages (fn () => key_val_store_init 3 true) 
 end

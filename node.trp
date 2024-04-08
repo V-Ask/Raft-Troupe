@@ -621,5 +621,5 @@ let fun not a = a = false
     val default_aliases = ["@node1", "@node2", "@node3"]
     (* #IMPORT libs/tests.trp *)
 
-in test_lots_of_messages (fn () => key_val_store_init 5 true) 
+in test_lots_of_messages (fn () => key_val_store_init 3 true) 
 end
