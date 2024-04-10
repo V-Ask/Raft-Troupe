@@ -45,7 +45,7 @@
                     let val callback = log_summary.applied_log_size > (length dic) 
                         andalso log_summary.entries_since_snap > 50
                     in 
-                        send(sender_id, ("SNAPSHOT-CALLBACK", callback));
+                        send(sender_id, ("SNAPSHOT_CALLBACK", callback));
                         loop dic end,
                 hn ("DROP", key) => drop key dic
             ]

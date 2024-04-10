@@ -1,4 +1,39 @@
-import stdio
-let val p_id = whereis("@node1", "node")
-in print "NOW"; sleep 2000; print (send(p_id, "dsadsafs"))
+import lists
+let val LOCAL_ERROR_TIMEOUT = 2000
+    fun start_timeout func duration = 
+        let fun timeout () = 
+            let val time = duration
+                val _ = sleep time
+            in func ()
+            end
+            val p_id = self()
+        in spawn timeout
+    end
+
+    fun err_timeout func default = 
+        let val p_id = self()
+            val nonce = mkuuid()
+        in 
+            start_timeout (fn () => send(p_id, ("ERROR_TIMEOUT", nonce))) LOCAL_ERROR_TIMEOUT;
+            spawn (fn () => 
+                let val x = func ()
+                in send(p_id, ("FUNCTION_DONE", nonce, x)) end);
+            receive [
+                hn ("ERROR_TIMEOUT", x) when x = nonce => 
+                    printString "==========================";
+                    printString "Timeout-Error on func:";
+                    print func;
+                    printString "Trying to recover, but there may be an error here";
+                    printString "==========================";
+                    default,
+                hn ("FUNCTION_DONE", x, output) when x = nonce =>
+                    output
+            ]
+    end
+
+    fun error_func a =
+        sleep 2005;
+        a + 1
+
+in print (err_timeout (fn() => error_func 10) 99)
 end

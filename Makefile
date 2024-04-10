@@ -3,12 +3,12 @@ MKALIASES=node $(TROUPE)/rt/built/p2p/mkaliases.js
 START=$(TROUPE)/network.sh
 LOCAL=$(TROUPE)/local.sh
 
-
+FILES := $(shell find libs -type f)
 
 run: build/node_dest.trp
 	$(LOCAL) ./build/node_dest.trp
 
-build/node_dest.trp: node.trp libs/log.trp libs/leader-info.trp libs/key-val.trp libs/tests.trp
+build/node_dest.trp: node.trp $(FILES)
 	python build.py node.trp
 
 zero.listener1:

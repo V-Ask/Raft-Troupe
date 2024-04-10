@@ -1,0 +1,11 @@
+let (* EXPORT START *)
+    fun counter_init n verbose = raft n (fn state => counter state []) 0 counter_hooks verbose
+    fun counter_test1 () =
+        let val raft = counter_init 5 true
+            val p_id = self()
+        in
+            send_delay(raft, ("RAFT-UPDATE", 10)) 5000;
+            send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 10000
+    end
+    (* EXPORT END *)
+end

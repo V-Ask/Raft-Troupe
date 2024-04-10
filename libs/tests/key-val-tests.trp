@@ -123,4 +123,10 @@ let
             send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 1000
     end
 
+    (* Application of the local Raft algorithm on a key-value-store*)
+    fun key_val_store_init n verbose = raft n key_val_store key_val_store_hooks verbose
+    (* Application of the distributed Raft algorithm on a key-value-store*)
+    fun key_val_store_init_d aliases verbose = raft_d aliases key_val_store key_val_store_hooks verbose
+
+
     (* EXPORT END *)
