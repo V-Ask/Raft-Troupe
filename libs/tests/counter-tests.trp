@@ -4,7 +4,9 @@ let (* EXPORT START *)
         let val raft = counter_init 5 true
             val p_id = self()
         in
+            send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
             send_delay(raft, ("RAFT-UPDATE", 10)) 5000;
+            send(raft, ("SEND-TO-NTH", 2, "debug-timeout"));
             send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 10000
     end
     (* EXPORT END *)

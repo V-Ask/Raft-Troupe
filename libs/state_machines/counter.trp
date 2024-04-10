@@ -1,6 +1,6 @@
 let (* EXPORT START *)
     fun countdown_after_n n callback_id nonce = 
-        sleep (n * 1000);
+        sleep (n);
         send(callback_id, ("COUNTDOWN_END", nonce))
 
     fun counter count changes = 
@@ -33,7 +33,7 @@ let (* EXPORT START *)
 
                     hn _ => loop changes
                 ]
-        in spawn(fn () => countdown_after_n 1 p_id nonce);
+        in spawn(fn () => countdown_after_n 250 p_id nonce);
         loop changes
     end
 

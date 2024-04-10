@@ -1,0 +1,7 @@
+let val test_rec = {a = 10, b = 20}
+    fun some_func record =
+        if record.a < record.b then
+            some_func ({ record with a = record.a + 6})
+        else print record; record
+in print (some_func test_rec)
+end
