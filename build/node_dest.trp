@@ -238,7 +238,7 @@ let
     fun take_snapshot state_machine_pid hooks index term = 
         let val pid = self()
             val state = 
-                send (state_machine_pid, (hooks.snapshot_gethook pid)); 
+                send (state_machine_pid, (hooks.get_state_hook pid)); 
                 receive[hn ("SNAPSHOT", x) => x]
         in set_snapshot state index term
     end
@@ -262,8 +262,7 @@ let
             val newLastApplied =
                 if log.lastApplied < snapshot.lastIncludedIndex then snapshot.lastIncludedIndex
                 else log.lastApplied
-        in  send(state_machine_pid, snapshot.snapshot);
-            { log with 
+        in { log with 
                 log = uncommitted_entries,
                 commitIndex = newCommitIndex,
                 lastApplied = newLastApplied,
@@ -291,7 +290,7 @@ let
 
     fun apply_state_changes state_machine_pid hooks log prev_state =
         if log.lastApplied < log.commitIndex then 
-            let val applied_log = apply_log log (fn x => send (state_machine_pid, x))
+                let val applied_log = apply_log log (fn x => send (state_machine_pid, x))
                 val p_id = self()
                 val new_state =
                     send(state_machine_pid, hooks.get_state_hook p_id);
@@ -701,7 +700,11 @@ let
             val req_votes = ((length node.all_nodes) / 2)
             
             fun won_election () = 
-                let val state_machine_pid = spawn(fn () => node.state_machine node.state)
+                let val starting_state = 
+                        if node.log.snapshot.lastIncludedIndex > node.log.lastApplied then
+                            node.log.snapshot.snapshot
+                        else node.state
+                    val state_machine_pid = spawn(fn () => node.state_machine starting_state)
                     val (applied_log, state) = apply_state_changes state_machine_pid node.hooks node.log node.state
                 in
                     verbose_print (node.id^": I won the election") node.verbose;

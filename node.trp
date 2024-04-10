@@ -306,7 +306,11 @@ let
             val req_votes = ((length node.all_nodes) / 2)
             
             fun won_election () = 
-                let val state_machine_pid = spawn(fn () => node.state_machine node.state)
+                let val starting_state = 
+                        if node.log.snapshot.lastIncludedIndex > node.log.lastApplied then
+                            node.log.snapshot.snapshot
+                        else node.state
+                    val state_machine_pid = spawn(fn () => node.state_machine starting_state)
                     val (applied_log, state) = apply_state_changes state_machine_pid node.hooks node.log node.state
                 in
                     verbose_print (node.id^": I won the election") node.verbose;

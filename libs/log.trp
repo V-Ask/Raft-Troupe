@@ -154,7 +154,7 @@
     fun take_snapshot state_machine_pid hooks index term = 
         let val pid = self()
             val state = 
-                send (state_machine_pid, (hooks.snapshot_gethook pid)); 
+                send (state_machine_pid, (hooks.get_state_hook pid)); 
                 receive[hn ("SNAPSHOT", x) => x]
         in set_snapshot state index term
     end
@@ -178,8 +178,7 @@
             val newLastApplied =
                 if log.lastApplied < snapshot.lastIncludedIndex then snapshot.lastIncludedIndex
                 else log.lastApplied
-        in  send(state_machine_pid, snapshot.snapshot);
-            { log with 
+        in { log with 
                 log = uncommitted_entries,
                 commitIndex = newCommitIndex,
                 lastApplied = newLastApplied,
@@ -207,7 +206,7 @@
 
     fun apply_state_changes state_machine_pid hooks log prev_state =
         if log.lastApplied < log.commitIndex then 
-            let val applied_log = apply_log log (fn x => send (state_machine_pid, x))
+                let val applied_log = apply_log log (fn x => send (state_machine_pid, x))
                 val p_id = self()
                 val new_state =
                     send(state_machine_pid, hooks.get_state_hook p_id);
