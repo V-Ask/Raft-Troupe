@@ -61,7 +61,7 @@ import quickselect
         leader: string,
         leader_info: LeaderInfo,
         state_machine: fn state => state_machine(state)
-        state: State,
+        empty_state: State,
         hooks: StateMachine,
         total_nodes: int,
         verbose: boolean
@@ -169,10 +169,10 @@ let
                 let val prev_commit = node.log.commitIndex
                     val highest_commit = calc_highest_commit (map (fn x => x.match) node.leader_info.matchIndex)
                     val node = { node with log = update_commit node.log highest_commit }
-                    val (applied_log, new_state) = apply_state_changes state_machine_pid node.hooks node.log node.state
+                    val applied_log = apply_log node.log (fn x => send(state_machine_pid, x))
                     val snapshot_log = 
                         if prev_commit < highest_commit then 
-                            evaluate_snapshot_cond state_machine_pid node.state node.hooks applied_log 
+                            evaluate_snapshot_cond state_machine_pid node.hooks applied_log 
                         else 
                             applied_log
                 in { node with log = snapshot_log }
@@ -306,18 +306,14 @@ let
             val req_votes = ((length node.all_nodes) / 2)
             
             fun won_election () = 
-                let val starting_state = 
-                        if node.log.snapshot.lastIncludedIndex > node.log.lastApplied then
-                            node.log.snapshot.snapshot
-                        else node.state
+                let val (starting_state, log) = get_startup_log_state_pair (node.empty_state, node.log)
                     val state_machine_pid = spawn(fn () => node.state_machine starting_state)
-                    val (applied_log, state) = apply_state_changes state_machine_pid node.hooks node.log node.state
+                    val applied_log = apply_log log (fn x => send(state_machine_pid, x))
                 in
                     verbose_print (node.id^": I won the election") node.verbose;
                     leader_node ({ 
                         node with leader_info = (new_leader node.all_nodes node.log),
-                        leader = p_id, 
-                        state = state,
+                        leader = p_id,
                         log = applied_log}) state_machine_pid
             end
             
@@ -536,7 +532,7 @@ let
             leader = (),
             leader_info = (),
             state_machine = state_machine,
-            state = init_state,
+            empty_state = init_state,
             hooks = hooks,
             node_amount = node_amount,
             verbose = verbose
@@ -664,5 +660,5 @@ let
 
     val default_aliases = ["@node1", "@node2", "@node3"]
 
-in counter_test1 ()
+in keyval_test1 (fn () => key_val_store_init 5 true)
 end

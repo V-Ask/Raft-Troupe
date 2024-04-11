@@ -26,11 +26,8 @@ let
     fun assert_equals a b =
         if a = b then ()
         else print "Assertion Error, expected"; print a; print "Actual:"; print b
-        
-    fun run_test raft_func =
-         raft_func
 
-    fun test1 raft_func = 
+    fun keyval_test1 raft_func = 
         let val raft = raft_func ()
         in
             send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
@@ -44,7 +41,7 @@ let
             send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 2000
     end
 
-    fun test2 raft_func = 
+    fun keyval_test2 raft_func = 
         let val raft = raft_func ()
         in 
             send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
@@ -52,7 +49,7 @@ let
             send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 1000
     end
 
-    fun test3 raft_func = 
+    fun keyval_test3 raft_func = 
         let val p_id = self()
             val raft = raft_func ()
         in 
@@ -61,7 +58,7 @@ let
             receive [hn x => print x]
     end
 
-    fun test4 raft_func = 
+    fun keyval_test4 raft_func = 
         let val raft = raft_func ()
         in
             send_delay(raft, ("RAFT-UPDATE", ("Hello", "There"))) 2000;
@@ -72,7 +69,7 @@ let
             send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 4000
     end
 
-    fun test5 raft_func =
+    fun keyval_test5 raft_func =
         let val raft = raft_func ()
         in
             send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
@@ -80,7 +77,7 @@ let
             send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 5000
     end
 
-    fun test6 raft_func = 
+    fun keyval_test6 raft_func = 
         let val raft = raft_func ()
         in 
             send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
@@ -90,7 +87,7 @@ let
             send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 5000
     end
 
-    fun test_snapshot raft_func =
+    fun keyval_test_snapshot raft_func =
         let val raft = raft_func ()
         in 
             send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
@@ -106,7 +103,7 @@ let
             send_delay(raft, ("SEND-TO-NTH", 1, "debug-printlog")) 1000
     end
 
-    fun test_lots_of_messages raft_func = 
+    fun keyval_test_lots_of_messages raft_func = 
         let val raft = raft_func ()
         in 
             send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
@@ -115,7 +112,7 @@ let
             send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 5000
     end
 
-    fun test_lots_of_unique_messages raft_func = 
+    fun keyval_test_lots_of_unique_messages raft_func = 
         let val raft = raft_func ()
         in
             sleep 5000;
@@ -124,9 +121,9 @@ let
     end
 
     (* Application of the local Raft algorithm on a key-value-store*)
-    fun key_val_store_init n verbose = raft n key_val_store key_val_store_hooks verbose
+    fun key_val_store_init n verbose = raft n key_val_store [] key_val_store_hooks verbose
     (* Application of the distributed Raft algorithm on a key-value-store*)
-    fun key_val_store_init_d aliases verbose = raft_d aliases key_val_store key_val_store_hooks verbose
+    fun key_val_store_init_d aliases verbose = raft_d aliases key_val_store [] key_val_store_hooks verbose
 
 
     (* EXPORT END *)

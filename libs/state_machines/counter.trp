@@ -15,11 +15,13 @@ let (* EXPORT START *)
 
                     hn ("SET", x) => counter x changes,
 
-                    hn ("GET", callback_pid) => print "THERE"; send(callback_pid, count); loop changes,
+                    hn ("GET", callback_pid) => send(callback_pid, count); loop changes,
                     
-                    hn ("SNAP_COND", (_, callback_pid)) => 
-                        send(callback_pid, ("SNAPSHOT_CALLBACK", false));
-                        loop [],
+                    hn ("SNAP_COND", (summary, callback_pid)) => 
+                        let val callback = summary.entries_since_snap > 9 andalso count > 10
+                        in 
+                            send(callback_pid, ("SNAPSHOT_CALLBACK", callback));
+                            loop changes end,
 
                     hn ("GET_STATE", callback_pid) =>
                         send(callback_pid, ("STATE_CALLBACK", count));
@@ -33,7 +35,7 @@ let (* EXPORT START *)
 
                     hn _ => loop changes
                 ]
-        in spawn(fn () => countdown_after_n 250 p_id nonce);
+        in spawn(fn () => countdown_after_n 500 p_id nonce);
         loop changes
     end
 
