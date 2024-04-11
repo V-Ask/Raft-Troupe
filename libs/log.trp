@@ -15,6 +15,7 @@
         snapshot = empty_snapshot,
         lastApplied = 0,
         commitIndex = 0,
+        internalChanges = 0,
         lastMessageSerial = ""
     }
 
@@ -29,6 +30,8 @@
         print log.commitIndex;
         printString "LastApplied:";
         print log.lastApplied;
+        printString "Internal Changes:";
+        print log.internalChanges;
         printString "----------------------";
         printString "Snapshot:";
         print log.snapshot;
@@ -48,12 +51,20 @@
         } 
     end
 
+
     (* Appends a list of message to the log *)
     fun add_entries_to_log log entries term =
         case entries of
         [] => log
         | h :: t => 
-            add_entries_to_log (append_message log h.command term h.serial) t h.term
+            add_entries_to_log (append_message log h.command term h.serial) t
+            h.term
+
+    fun update_applied_inner log = {
+        log with
+        lastApplied = log.lastApplied + 1,
+        internalChanges = log.internalChanges - 1
+    }
 
     (* Updates the lastApplied-index*)
     fun update_applied log = {
@@ -113,20 +124,41 @@
     fun uncommitted_entries log = get_commands_after_nth log log.commitIndex
 
     (* Applies all log-entries that have been committed, but not applied *)
-    fun apply_log log f = if log.lastApplied < log.commitIndex 
-        then 
-            let val _ = f ((get_nth_command log (log.lastApplied + 1)).command) 
-            val log = update_applied log
-            in apply_log log f end
-        else log
+    fun apply_log log f = 
+        let fun apply_internal log = let 
+                val lastApplied = min (log.lastApplied + log.internalChanges) log.commitIndex
+                val internalChanges = log.internalChanges - (lastApplied - log.lastApplied)
+            in { log with lastApplied = lastApplied,
+                        internalChanges = internalChanges} end
+
+            fun apply_external log f = if log.lastApplied < log.commitIndex 
+                    then 
+                        let val _ = f ((get_nth_command log (log.lastApplied + 1)).command) 
+                        val log = update_applied log
+                        in apply_external log f end
+                    else log
+
+            val new_log = apply_external (apply_internal log) f
+        in new_log
+    end
+
+    fun update_state state trans_func log =
+        if log.lastApplied < log.commitIndex then
+            let val command = (get_nth_command log (log.lastApplied + 1)).command
+                val state = trans_func (state, command)
+                val log = update_applied log
+            in update_state state trans_func log end
+        else (state, log)
     
     (* Receive a snapshot of the state-machine's current state *)
     fun take_snapshot state_machine_pid hooks index term = 
-        let val pid = self()
-            val state = 
-                send (state_machine_pid, (hooks.snapshot_gethook pid)); 
-                receive[hn ("SNAPSHOT", x) => x]
-        in set_snapshot state index term
+        let val p_id = self()
+            val snapshot = 
+                send (state_machine_pid, hooks.get_state_hook p_id);
+                receive [
+                    hn ("STATE_CALLBACK", state) => state
+                ]
+        in set_snapshot snapshot index term
     end
 
     (* Get a snapshot of all committed entries *)
@@ -148,8 +180,7 @@
             val newLastApplied =
                 if log.lastApplied < snapshot.lastIncludedIndex then snapshot.lastIncludedIndex
                 else log.lastApplied
-        in  send(state_machine_pid, snapshot.snapshot);
-            { log with 
+        in { log with 
                 log = uncommitted_entries,
                 commitIndex = newCommitIndex,
                 lastApplied = newLastApplied,
@@ -164,14 +195,47 @@
 
     (* Asks the state-machine whether or not to snapshot *)
     fun evaluate_snapshot_cond state_machine_pid hooks log = 
-        let val p_id = self ()
-            val summary = generate_summary log
-        in 
-            send(state_machine_pid, (hooks.snapshot_condition_hook (summary, p_id)));
-            receive [
-                hn ("SNAPSHOT-CALLBACK", callback) => 
-                    if callback then apply_snapshot state_machine_pid (get_snapshot state_machine_pid hooks log) log
-                    else log
-            ]
+        if log.internalChanges > 0 then log
+        else 
+            let val p_id = self ()
+                val summary = generate_summary log
+            in 
+                send(state_machine_pid, (hooks.snapshot_condition_hook (summary, p_id)));
+                receive [
+                    hn ("SNAPSHOT_CALLBACK", callback) => 
+                        if callback then apply_snapshot state_machine_pid (get_snapshot state_machine_pid hooks log) log
+                        else log
+                ]
+        end
+    
+    fun prepend_internal_change changes node_term log = 
+        let val insert_index = log.internalChanges + log.commitIndex - log.snapshot.lastIncludedIndex
+            val term = if insert_index < (length log.log) then (get_nth_command log insert_index).term else node_term
+            val change_entries = map (fn change => { term = term, command = change, serial = 0}) changes
+            val entries = append_at_index (reverse log.log) change_entries insert_index 
+        in { log with log = reverse entries,
+                internalChanges = log.internalChanges + (length changes)}
     end
+
+    fun add_internal_changes state_machine_pid hooks node_term log =
+        let val p_id = self ()
+            val changes =
+                send(state_machine_pid, hooks.get_changes_hook p_id);
+                receive [
+                    hn ("CHANGES_CALLBACK", callback) => callback
+                ]
+        in 
+            case changes of
+            [] => log
+            | h :: t => prepend_internal_change (h :: t) node_term log
+            | _ => printString "ERROR: Changes should be a list of messages"; log
+    end
+
+    fun get_startup_log_state_pair (fallback_state, log)  =
+        if log.snapshot.snapshot = () then 
+            (fallback_state, { log with lastApplied = 0 })
+        else 
+            (log.snapshot.snapshot, { log with lastApplied = log.snapshot.lastIncludedIndex})
+        
+
     (* EXPORT END *)

@@ -1,5 +1,5 @@
     (* EXPORT START *)
-    fun key_val_store () = 
+    fun key_val_store dic = 
         let fun remove element list = 
             case list of 
             [] => []
@@ -28,25 +28,28 @@
             end
         fun drop key dic = 
             remove (get_record key dic) dic
-        val dic = []
         fun loop dic = 
             let val dic = receive [
                 hn ("SET", (key, value)) => set (key, value) dic,
+
                 hn ("GET", (key, sender_id)) => 
-                    let val _ = send(sender_id, ("RESPONSE", (get key dic)))
-                    in dic
-                    end,
-                hn ("GET_SNAPSHOT", sender_id) => 
-                    let val _ = send(sender_id, ("SNAPSHOT", dic))
-                    in dic
-                    end,
-                hn ("SET_SNAPSHOT", other_dic) => loop other_dic,
+                    send(sender_id, ("RESPONSE", (get key dic)));
+                    dic,
+                hn ("GET_STATE", sender_id) => 
+                    send(sender_id, ("SNAPSHOT", dic));
+                    dic,
+
                 hn ("SNAPSHOT_CONDITION", (log_summary, sender_id)) => 
                     let val callback = log_summary.applied_log_size > (length dic) 
                         andalso log_summary.entries_since_snap > 50
                     in 
-                        send(sender_id, ("SNAPSHOT-CALLBACK", callback));
-                        loop dic end,
+                        send(sender_id, ("SNAPSHOT_CALLBACK", callback));
+                        dic end,
+                
+                hn ("GET_CHANGES", callback_pid) =>
+                    send(callback_pid, ("CHANGES_CALLBACK", []));
+                    dic,
+
                 hn ("DROP", key) => drop key dic
             ]
             in loop dic
@@ -57,7 +60,7 @@
     val key_val_store_hooks = 
         {sethook = (fn x => case x of (key, value) => ("SET", (key, value))), 
             gethook = (fn (x, callback_pid) => ("GET", (x, callback_pid))), 
-            snapshot_gethook = (fn (callback_pid) => ("GET_SNAPSHOT", callback_pid)),
-            snapshot_sethook = (fn x => ("SET_SNAPSHOT", x)),
+            get_state_hook = (fn (callback_pid) => ("GET_STATE", callback_pid)),
+            get_changes_hook = (fn callback_pid => ("GET_CHANGES", callback_pid)),
             snapshot_condition_hook = (fn (log_summary, callback_pid) => ("SNAPSHOT_CONDITION", (log_summary, callback_pid)))}
     (* EXPORT END *)

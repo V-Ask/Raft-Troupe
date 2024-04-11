@@ -1,0 +1,50 @@
+let (* EXPORT START *)
+    fun countdown_after_n n callback_id nonce = 
+        sleep (n);
+        send(callback_id, ("COUNTDOWN_END", nonce))
+
+    fun counter count changes = 
+        let val nonce = mkuuid()
+            val p_id = self()
+            fun loop changes =
+                receive [
+                    hn ("COUNTDOWN_END", x) when nonce = x => 
+                        counter (count + 1) (append changes [("INCREMENT")]),
+
+                    hn ("INCREMENT") => counter (count + 1) changes,
+
+                    hn ("SET", x) => counter x changes,
+
+                    hn ("GET", callback_pid) => send(callback_pid, count); loop changes,
+                    
+                    hn ("SNAP_COND", (summary, callback_pid)) => 
+                        let val callback = summary.entries_since_snap > 9 andalso count > 10
+                        in 
+                            send(callback_pid, ("SNAPSHOT_CALLBACK", callback));
+                            loop changes end,
+
+                    hn ("GET_STATE", callback_pid) =>
+                        send(callback_pid, ("STATE_CALLBACK", count));
+                        loop changes,
+
+                    hn ("GET_CHANGES", callback_pid) => 
+                        send(callback_pid, ("CHANGES_CALLBACK", changes));
+                        loop [],
+
+                    hn ("SHUTDOWN") => (),
+
+                    hn _ => loop changes
+                ]
+        in spawn(fn () => countdown_after_n 500 p_id nonce);
+        loop changes
+    end
+
+    val counter_hooks = 
+        {sethook = (fn x => ("SET", x)), 
+            gethook = (fn (x, callback_pid) => ("GET", callback_pid)), 
+            get_state_hook = (fn callback_pid => ("GET_STATE", callback_pid)),
+            get_changes_hook = (fn callback_pid => ("GET_CHANGES", callback_pid)),
+            snapshot_condition_hook = (fn (log_summary, callback_pid) => ("SNAP_COND", (log_summary, callback_pid)))}
+(* EXPORT END *)
+end
+    
