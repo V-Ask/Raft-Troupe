@@ -210,7 +210,8 @@
     
     fun prepend_internal_change changes node_term log = (* TODO: Fix at internal changes ikke kan ske før første heartbeat*)
         let val insert_index = log.internalChanges + log.commitIndex - log.snapshot.lastIncludedIndex
-            val term = if insert_index < (length log.log) then (get_nth_command log insert_index).term else node_term
+            val term = if insert_index < (length log.log) then (get_nth_command log (insert_index + 1)).term
+            else node_term
             val change_entries = map (fn change => { term = term, command = change, serial = 0}) changes
             val entries = insert_at_index (reverse log.log) change_entries insert_index 
         in { log with log = reverse entries,
