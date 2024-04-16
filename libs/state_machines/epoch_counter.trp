@@ -5,7 +5,7 @@ let
 
   fun epoch_counter start = let
     val p_id = self ()
-    fun timeout n = sleep (300); send (p_id, ("TIMEOUT", n))
+    fun timeout n = sleep (550); send (p_id, ("TIMEOUT", n))
 
 
     fun main_loop counter changes = let
@@ -24,7 +24,7 @@ let
               {counter with y = counter.y + 1}
               changes,
 
-          hn ("INCREASE_EPOCH", x) => 
+          hn ("INCREASE_EPOCH") => 
             loop 
               {counter with x = counter.x + 1}
               changes,
@@ -42,7 +42,7 @@ let
             send (callback, ("STATE_CALLBACK", counter));
             loop counter changes,
 
-          hn ("GET_CHANGES", callback) =>
+          hn ("GET_CHANGES", callback) => 
             send (callback, ("CHANGES_CALLBACK", changes));
             loop counter [],
 
@@ -55,9 +55,9 @@ let
   end
 
   val epoch_counter_hooks = {
-    sethook = (fn _ => ("INCREASE_EPOCH")),
+    sethook = (fn x => ("INCREASE_EPOCH")),
     gethook = (fn callback => ("GET_STATE", callback)),
-    snapshot_condition_hook = (fn (log_summary, callback) => ("SNAP_COND", (summary, callback))),
+    snapshot_condition_hook = (fn (log_summary, callback) => ("SNAP_COND", (log_summary, callback))),
     get_state_hook = (fn callback => ("GET_SNAPSHOT", callback)),
     get_changes_hook = (fn callback => ("GET_CHANGES", callback))
   }

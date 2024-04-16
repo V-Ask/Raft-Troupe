@@ -1,0 +1,17 @@
+(* EXPORT START *)
+fun epoch_counter_init n verbose = raft n epoch_counter {x = 0, y = 0} epoch_counter_hooks verbose
+fun epoch_test1 () = let 
+  val raft = epoch_counter_init 5 true
+  val pid = self ()
+in
+  print "Starting Test";
+  send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
+  send_delay(raft, ("RAFT-UPDATE", 1)) 200;
+  send_delay(raft, ("RAFT-GET", pid)) 1500; 
+  print (receive [hn x => x]);
+  send_delay(raft, ("RAFT-UPDATE", 1)) 200;
+  send_delay(raft, ("RAFT-GET", pid)) 1500;
+  print (receive [hn x => x]);
+  send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 2000
+end
+(* EXPORT END *)

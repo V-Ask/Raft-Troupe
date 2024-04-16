@@ -84,9 +84,6 @@ let
 
     (* #IMPORT libs/log.trp *)
 
-    (* #IMPORT libs/state_machines/key-val.trp *)
-
-    (* #IMPORT libs/state_machines/counter.trp *)
 
     (* #IMPORT libs/leader-info.trp *)
 
@@ -655,10 +652,18 @@ let
         in spawn (fn () => dialer nodes)
     end
 
+    (* #IMPORT libs/state_machines/key-val.trp *)
+
+    (* #IMPORT libs/state_machines/counter.trp *)
+
+    (* #IMPORT libs/state_machines/epoch_counter.trp *)
+
     (* #IMPORT libs/tests/key-val-tests.trp *)
     (* #IMPORT libs/tests/counter-tests.trp *)
 
+    (* #IMPORT libs/tests/epoch-counter-tests.trp *)
+
     val default_aliases = ["@node1", "@node2", "@node3"]
 
-in keyval_test1 (fn () => key_val_store_init 5 true)
+in epoch_test1 () 
 end
