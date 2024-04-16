@@ -1,6 +1,6 @@
 import lists
 import stdio
-import quickselect
+
 
 (*
     Log = {
@@ -86,6 +86,8 @@ let
     fun max a b = if a < b then b else a 
 
     fun min a b = if a > b then b else a
+
+    (* #IMPORT libs/quickselect.trp *)
 
     (* #IMPORT libs/log.trp *)
 
