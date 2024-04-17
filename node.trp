@@ -40,7 +40,7 @@ import quickselect
     StateMachine = {
         set_hook : fn (x: string) => x
         get_hook : fn (x: string, callback_pid: string) => x
-        get_state_hook : fn(callback_pid: string) => x
+        get_snapshot_hook : fn(callback_pid: string) => x
         get_changes_hook : fn (callback_pid: string) => x
         snapshot_condition_hook : fn (log_summary: LogSummary, callback_pid: string) => x: bool
     }
@@ -72,6 +72,11 @@ import quickselect
 let 
     (* Constants *)
     val LOCAL_ERROR_TIMEOUT = 4000
+    val ELECTION_TIMEOUT_LOWER = 2000
+    val ELECTION_TIMEOUT_UPPER = 4000
+    val HEARTBEAT_INTERVAL = 500
+    val DIALER_NOLEADER_TIMEOUT = 500
+    val DIALER_NOMSG_TIMEOUT = 2000
 
     fun not a = a = false
     fun send_to_all processes msg sender = map (fn x => send(x, msg)) (filter (fn x => x <> sender) processes)
@@ -123,7 +128,7 @@ let
     end
 
     (* Starts a random timeout with lower=2sec and upper=4sec *)
-    fun start_random_timeout func = start_timeout func (2000 + ((random ()) * 2000))
+    fun start_random_timeout func = start_timeout func (ELECTION_TIMEOUT_LOWER + ((random ()) * (ELECTION_TIMEOUT_UPPER - ELECTION_TIMEOUT_LOWER)))
     
     fun leader_node node state_machine_pid = 
         let val p_id = self()
@@ -283,7 +288,7 @@ let
         in 
             (* Append entries for each follower *)
             map (fn x => append_entries x) (filter (fn x => x <> p_id) node.all_nodes);
-            start_timeout (fn () => send (p_id, ("SEND_HEARTBEAT", nonce))) 500;
+            start_timeout (fn () => send (p_id, ("SEND_HEARTBEAT", nonce))) HEARTBEAT_INTERVAL;
             loop node
     end
 
@@ -603,9 +608,9 @@ let
                 ]
                 in
                     (case leader of
-                    () => msg_timeout 500
+                    () => msg_timeout DIALER_NOLEADER_TIMEOUT
                     | x =>                         
-                        msg_timeout 2000; 
+                        msg_timeout DIALER_NOMSG_TIMEOUT; 
                         send(x, msg));
                     wait ()
             end

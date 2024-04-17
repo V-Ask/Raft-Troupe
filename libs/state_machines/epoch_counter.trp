@@ -58,7 +58,7 @@ let
     sethook = (fn x => ("INCREASE_EPOCH")),
     gethook = (fn callback => ("GET_STATE", callback)),
     snapshot_condition_hook = (fn (log_summary, callback) => ("SNAP_COND", (log_summary, callback))),
-    get_state_hook = (fn callback => ("GET_SNAPSHOT", callback)),
+    get_snapshot_hook = (fn callback => ("GET_SNAPSHOT", callback)),
     get_changes_hook = (fn callback => ("GET_CHANGES", callback))
   }
   (* EXPORT END *)

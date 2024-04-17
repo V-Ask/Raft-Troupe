@@ -42,7 +42,7 @@ let (* EXPORT START *)
     val counter_hooks = 
         {sethook = (fn x => ("SET", x)), 
             gethook = (fn (x, callback_pid) => ("GET", callback_pid)), 
-            get_state_hook = (fn callback_pid => ("GET_STATE", callback_pid)),
+            get_snapshot_hook = (fn callback_pid => ("GET_STATE", callback_pid)),
             get_changes_hook = (fn callback_pid => ("GET_CHANGES", callback_pid)),
             snapshot_condition_hook = (fn (log_summary, callback_pid) => ("SNAP_COND", (log_summary, callback_pid)))}
 (* EXPORT END *)

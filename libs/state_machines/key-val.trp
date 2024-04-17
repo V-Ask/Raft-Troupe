@@ -60,7 +60,7 @@
     val key_val_store_hooks = 
         {sethook = (fn x => case x of (key, value) => ("SET", (key, value))), 
             gethook = (fn (x, callback_pid) => ("GET", (x, callback_pid))), 
-            get_state_hook = (fn (callback_pid) => ("GET_STATE", callback_pid)),
+            get_snapshot_hook = (fn (callback_pid) => ("GET_STATE", callback_pid)),
             get_changes_hook = (fn callback_pid => ("GET_CHANGES", callback_pid)),
             snapshot_condition_hook = (fn (log_summary, callback_pid) => ("SNAPSHOT_CONDITION", (log_summary, callback_pid)))}
     (* EXPORT END *)
