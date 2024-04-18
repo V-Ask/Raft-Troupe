@@ -1,0 +1,24 @@
+(* EXPORT START *)
+fun ping_init n verbose = raft n ping 0 ping_hooks verbose 
+fun ping_test1 () = let 
+  val raft = ping_init 5 true
+  val pid = self ()
+in 
+  print "Starting Test";
+  sleep 1000;
+  send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
+
+  send (raft, ("RAFT-GET", ("ping", pid))) ;
+  print (receive [hn x => x]);
+  send (raft, ("RAFT-GET", ("ping", pid))) ;
+  send_delay (raft, ("RAFT-GET", ("ping", pid))) 200;
+  print (receive [hn x => x]);
+  send_delay (raft, ("RAFT-GET", ("ping", pid))) 200;
+  print (receive [hn x => x]);
+  send_delay (raft, ("RAFT-GET", ("get", pid))) 200;
+  print (receive [hn x => x])
+end
+
+
+
+(* EXPORT END *)

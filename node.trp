@@ -213,6 +213,7 @@ let
                             loop node end,
 
                     hn (("RAFT-GET", x), dialer_id) =>
+                        print "TEST";
                         send (state_machine_pid, (node.hooks.gethook x));
                         send(dialer_id, "DIALER-ACK");
                         loop node,
@@ -665,12 +666,18 @@ let
 
     (* #IMPORT libs/state_machines/epoch_counter.trp *)
 
+    (* #IMPORT libs/state_machines/ping.trp *)
+
+
     (* #IMPORT libs/tests/key-val-tests.trp *)
+
     (* #IMPORT libs/tests/counter-tests.trp *)
 
     (* #IMPORT libs/tests/epoch-counter-tests.trp *)
 
+    (* #IMPORT libs/tests/ping-tests.trp *)
+
     val default_aliases = ["@node1", "@node2", "@node3"]
 
-in epoch_test1 ()
+in ping_test1 ()
 end
