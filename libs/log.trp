@@ -154,7 +154,7 @@
     fun take_snapshot state_machine_pid hooks index term = 
         let val p_id = self()
             val snapshot = 
-                send (state_machine_pid, hooks.get_state_hook p_id);
+                send (state_machine_pid, hooks.get_snapshot_hook p_id);
                 receive [
                     hn ("STATE_CALLBACK", state) => state
                 ]

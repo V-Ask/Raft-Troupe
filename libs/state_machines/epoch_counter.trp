@@ -5,7 +5,7 @@ let
 
   fun epoch_counter start = let
     val p_id = self ()
-    fun timeout n = sleep (550); send (p_id, ("TIMEOUT", n))
+    fun timeout n = sleep (350); send (p_id, ("TIMEOUT", n))
 
 
     fun main_loop counter changes = let
