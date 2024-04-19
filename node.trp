@@ -490,7 +490,7 @@ let
                     
                     (* If client sends get, send the leader's id*)
                     hn (("RAFT-GET", x), dialer_id) => 
-                        send(dialer_id, ("NOT-LEADER", node.leader, x)),
+                        send(dialer_id, ("NOT-LEADER", node.leader)),
 
                     (* Prints the log *)
                     hn ("debug-printlog") =>
@@ -679,5 +679,5 @@ let
 
     val default_aliases = ["@node1", "@node2", "@node3"]
 
-in ping_test2 ()
+in keyval_test7 (fn () => key_val_store_init 5 true)
 end

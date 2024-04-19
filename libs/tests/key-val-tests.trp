@@ -87,6 +87,18 @@ let
             send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 5000
     end
 
+    fun keyval_test7 raft_func =
+        let val raft = raft_func ()
+            val p_id = self()
+        in
+            send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
+            send_delay(raft, ("RAFT-GET", ("B", p_id))) 1500;
+            receive [ hn x => print x ];
+            send_delay(raft, ("RAFT-UPDATE", ("B", 2))) 1000;
+            send_delay(raft, ("RAFT-GET", ("B", p_id))) 1500;
+            receive [ hn x => print x ]
+    end
+
     fun keyval_test_snapshot raft_func =
         let val raft = raft_func ()
         in 
