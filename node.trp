@@ -213,7 +213,6 @@ let
                             loop node end,
 
                     hn (("RAFT-GET", x), dialer_id) =>
-                        print "TEST";
                         send (state_machine_pid, (node.hooks.gethook x));
                         send(dialer_id, "DIALER-ACK");
                         loop node,
@@ -612,7 +611,7 @@ let
                 in
                     (case leader of
                     () => msg_timeout DIALER_NOLEADER_TIMEOUT
-                    | x =>                         
+                    | x =>
                         msg_timeout DIALER_NOMSG_TIMEOUT; 
                         send(x, msg));
                     wait ()
@@ -642,7 +641,8 @@ let
                         send_to_all cluster x (self());
                         leader,
                     hn x => leader ]
-                in loop leader end
+                in loop leader 
+            end
         in loop leader
     end
 
@@ -679,5 +679,5 @@ let
 
     val default_aliases = ["@node1", "@node2", "@node3"]
 
-in ping_test1 ()
+in ping_test2 ()
 end

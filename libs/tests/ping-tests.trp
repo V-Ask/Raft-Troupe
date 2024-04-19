@@ -6,18 +6,34 @@ fun ping_test1 () = let
 in 
   print "Starting Test";
   sleep 1000;
-  send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
-
   send (raft, ("RAFT-GET", ("ping", pid))) ;
   print (receive [hn x => x]);
   send (raft, ("RAFT-GET", ("ping", pid))) ;
-  send_delay (raft, ("RAFT-GET", ("ping", pid))) 200;
   print (receive [hn x => x]);
-  send_delay (raft, ("RAFT-GET", ("ping", pid))) 200;
+  send_delay (raft, ("RAFT-GET", ("ping", pid))) 1000;
+  print (receive [hn x => x]);
+  send_delay (raft, ("RAFT-GET", ("ping", pid))) 2000;
   print (receive [hn x => x]);
   send_delay (raft, ("RAFT-GET", ("get", pid))) 200;
   print (receive [hn x => x])
 end
+
+fun ping_test2 () = let 
+  val raft = ping_init 5 true
+  val pid = self ()
+
+  fun loop () =
+    send (raft, ("RAFT-GET", ("ping", pid)));
+    print (receive [hn x => x]);
+    sleep 1000;
+    send (raft, ("RAFT-GET", ("get", pid)));
+    print (receive [hn x => x]);
+    sleep 300;
+    loop ()
+
+  in loop ()
+end
+
 
 
 
