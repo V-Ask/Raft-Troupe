@@ -15,7 +15,6 @@
         snapshot = empty_snapshot,
         lastApplied = 0,
         commitIndex = 0,
-        internalChanges = 0,
         lastMessageSerial = ""
     }
 
@@ -30,18 +29,17 @@
         print log.commitIndex;
         printString "LastApplied:";
         print log.lastApplied;
-        printString "Internal Changes:";
-        print log.internalChanges;
         printString "----------------------";
         printString "Snapshot:";
         print log.snapshot;
         printString "========******========\n"
 
     (* Appends a message to the log, and notes the message's serial number *)
-    fun append_message log message term serial = 
+    fun append_message log message callback term serial = 
         let val new_entry = {
             term = term,
             command = message,
+            callback = callback,
             serial = serial
         }
         in {
@@ -57,14 +55,8 @@
         case entries of
         [] => log
         | h :: t => 
-            add_entries_to_log (append_message log h.command term h.serial) t
+            add_entries_to_log (append_message log h.command h.callback term h.serial) t
             h.term
-
-    fun update_applied_inner log = {
-        log with
-        lastApplied = log.lastApplied + 1,
-        internalChanges = log.internalChanges - 1
-    }
 
     (* Updates the lastApplied-index*)
     fun update_applied log = {
@@ -86,9 +78,12 @@
         log = prev_log
     }
     end
-    
+
     (* Get the entry of the latest log entry *)
     fun get_log_index log = (length log.log) + log.snapshot.lastIncludedIndex
+
+    (*Determines whether or not all log changes have been committed*)
+    fun log_is_committed log = (get_log_index log = log.commitIndex)
 
     (* Rolls the log back n time *)
     fun rollback_log_to log n = 
@@ -124,41 +119,36 @@
     fun uncommitted_entries log = get_commands_after_nth log log.commitIndex
 
     (* Applies all log-entries that have been committed, but not applied *)
-    fun apply_log log f = 
-        let fun apply_external log f = if log.lastApplied < log.commitIndex 
-                    then 
-                        let val _ = f ((get_nth_command log (log.lastApplied + 1)).command) 
-                        val log = update_applied log
-                        in apply_external log f end
-                    else log
-
-            val new_log = apply_external log f
-        in new_log
-    end
-    
-    (* Receive a snapshot of the state-machine's current state *)
-    fun take_snapshot state_machine_pid hooks index term = 
-        let val p_id = self()
-            val snapshot = 
-                send (state_machine_pid, hooks.get_snapshot_hook p_id);
-                receive [
-                    hn ("STATE_CALLBACK", state) => state
-                ]
-        in set_snapshot snapshot index term
-    end
+    fun apply_log log state_machine is_leader =
+        if log.lastApplied < log.commitIndex then
+            let val entry = get_nth_command log (log.lastApplied + 1) 
+                val command = entry.command
+                val (status, step, sides) = state_machine
+                val (new_status, new_step, new_sides) = case status of 
+                        DONE => state_machine
+                        | _ => step command
+                val log = update_applied log
+            in 
+                (if is_leader then
+                    entry.callback ();
+                    (case new_sides of
+                    [] => ()
+                    | x => map (fn x => x ()) x)
+                else ());
+                apply_log log (new_status, new_step, new_sides) is_leader end
+        else (log, state_machine)
 
     (* Get a snapshot of all committed entries *)
-    fun get_snapshot state_machine_pid hooks log = 
+    fun get_snapshot state log = 
         if log.commitIndex > 0 andalso 
         (log.commitIndex - log.snapshot.lastIncludedIndex) <= length log.log then
             let val lastCommitted = get_nth_command log log.commitIndex
-                val snapshot = take_snapshot state_machine_pid hooks log.commitIndex lastCommitted.term
-            in snapshot end
+            in set_snapshot state log.commitIndex lastCommitted.term end
         else empty_snapshot
         
 
     (* Applies a snapshot to the log *)
-    fun apply_snapshot state_machine_pid snapshot log =
+    fun apply_snapshot snapshot log =
         let val uncommitted_entries = uncommitted_entries log
             val newCommitIndex =
                 if log.commitIndex < snapshot.lastIncludedIndex then snapshot.lastIncludedIndex
@@ -180,25 +170,12 @@
             entries_since_snap = (log.lastApplied - log.snapshot.lastIncludedIndex)}
 
     (* Asks the state-machine whether or not to snapshot *)
-    fun evaluate_snapshot_cond state_machine_pid hooks log = 
-        if log.internalChanges > 0 then log
-        else 
-            let val p_id = self ()
-                val summary = generate_summary log
-            in 
-                send(state_machine_pid, (hooks.snapshot_condition_hook (summary, p_id)));
-                receive [
-                    hn ("SNAPSHOT_CALLBACK", callback) => 
-                        if callback then apply_snapshot state_machine_pid (get_snapshot state_machine_pid hooks log) log
-                        else log
-                ]
+    fun evaluate_snapshot_cond state snapshot_cond log =
+        let val p_id = self ()
+            val summary = generate_summary log
+        in 
+            if snapshot_cond summary then
+                apply_snapshot (get_snapshot state log) log
+            else log
         end
-
-    fun get_startup_log_state_pair (fallback_state, log)  =
-        if log.snapshot.snapshot = () then 
-            (fallback_state, { log with lastApplied = 0 })
-        else 
-            (log.snapshot.snapshot, { log with lastApplied = log.snapshot.lastIncludedIndex})
-        
-
     (* EXPORT END *)

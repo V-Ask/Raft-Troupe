@@ -1,0 +1,34 @@
+datatype Atoms = WAIT
+                | SUS
+                | DONE
+
+let (* EXPORT START *)
+
+    fun simple_cps () =
+        let fun increment count () =
+            (SUS, fn () =>
+                if count > 9 then (WAIT, fn x => (DONE, (), [fn () => print x]), [fn () => print count, fn () =>
+                print "Testing"])
+                else (SUS, increment (count + 1), []), [])
+        in (SUS, increment 9, [])
+    end
+
+    fun simpler_cps () =
+        (SUS, fn () =>
+            (SUS, fn () =>
+                (WAIT, fn x =>
+                    (SUS, fn () =>
+                        (DONE, (), 
+                        [fn () => print "DONE"]), 
+                    [fn () => print x]),
+                [fn () => print "Gimme input..."]),
+            [fn () => print "Yo"]),
+        [])
+    (* EXPORT END *)
+    val (stat, step, side) = simpler_cps ()
+    val (stat, step, side) = step ()
+    val (stat, step, side) = step ()
+    val (stat, step, side) = step ()
+    val (stat, step, side) = step ()
+in print stat
+end
