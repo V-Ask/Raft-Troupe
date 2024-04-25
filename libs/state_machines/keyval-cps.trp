@@ -6,18 +6,33 @@ let (* EXPORT START *)
   fun keyval () = 
     let 
       val store = []
-      fun set store (key, value) = let 
+
+      fun set store (key, value) () = let 
         val store = (key, value) :: store 
-      in (WAIT, main store, []) 
+      in ([], WAIT, main store, ) 
       end
       
 
-      and get store key = (WAIT, main store , [first (filter (fn (x,_) => x = key) store)])
+      and get store key () = (
+        [first (filter (fn (x,_) => x = key) store)], 
+        WAIT, 
+        main store)
       
 
       and main store x = case x of 
-        "GET"=> (WAIT, get store, [])
-        | "SET" => (WAIT, set store, [])
+        ("GET", key) => (
+          [], 
+          SUS, 
+          get store key
+        )
+
+        | ("SET", (key, value)) => (
+          [], 
+          SUS, 
+          set store (key, value)
+        )
+
+        | _ => ([], WAIT, main store)
 
     in (WAIT, main store, []) 
   end (* EXPORT END *)
