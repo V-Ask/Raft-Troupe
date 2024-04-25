@@ -678,9 +678,5 @@ let
 
     val default_aliases = ["@node1", "@node2", "@node3"]
 
-<<<<<<< HEAD
-in ping_test3 ()
-=======
-in cps_test1()
->>>>>>> 0c31359 (Maybe a bit slow, but we have something that works)
+in ()
 end

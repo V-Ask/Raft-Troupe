@@ -24,6 +24,9 @@ let (* EXPORT START *)
                 [fn () => print "Gimme input..."]),
             [fn () => print "Yo"]),
         [])
+
+    fun infinite_cps () = 
+        (SUS, infinite_cps, [])
     (* EXPORT END *)
     val (stat, step, side) = simpler_cps ()
     val (stat, step, side) = step ()
