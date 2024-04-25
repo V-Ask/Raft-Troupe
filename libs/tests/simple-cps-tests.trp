@@ -1,7 +1,7 @@
 (* EXPORT START *)
 
 fun cps_test1 () = 
-    let val raft = raft 5 (simpler_cps ()) (fn x => x.entries_since_snap > 2) false
+    let val raft = raft 5 (simpler_cps ()) (fn x => x.entries_since_snap > 2) true
     in 
         send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
         send_delay(raft, ("RAFT-UPDATE", "This is a message")) 500;

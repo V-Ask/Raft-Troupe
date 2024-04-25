@@ -14,16 +14,11 @@ let (* EXPORT START *)
     end
 
     fun simpler_cps () =
-        (SUS, fn () =>
-            (SUS, fn () =>
-                (WAIT, fn x =>
-                    (SUS, fn () =>
-                        (DONE, (), 
-                        [fn () => print "DONE"]), 
-                    [fn () => print x]),
-                [fn () => print "Gimme input..."]),
-            [fn () => print "Yo"]),
-        [])
+        ([], SUS, fn () =>
+            ([fn () => print "Suspended...:"], SUS, fn () =>
+                ([fn () => print "Give input:"], WAIT, fn x =>
+                    ([fn () => print x], SUS, fn () =>
+                        ([fn () => print "DONE"], DONE, ())))))
 
     fun infinite_cps () = 
         (SUS, infinite_cps, [])

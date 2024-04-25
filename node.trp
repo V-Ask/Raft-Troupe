@@ -1,6 +1,4 @@
 import lists
-import stdio
-
 
 (*
     Log = {
@@ -61,7 +59,7 @@ import stdio
         leader: string,
         leader_info: LeaderInfo,
         snapshot_condition: fn logSummary => ... : boolean
-        state_machine: (STATUS, STEP-FUNC, [SIDE-EFFECTS])
+        state_machine: ([SIDE-EFFECTS], STATUS, STEP-FUNC)
         total_nodes: int,
         verbose: boolean
     }
@@ -174,7 +172,6 @@ let
 
             (* Convert leader to follower *)
             fun demote term leader voted_for node = 
-                (* Kill-function needed here to destroy state-machine, temporary solution *)
                 {node with 
                     term = term, 
                     leader = leader,
@@ -204,7 +201,7 @@ let
                             evaluate_snapshot_cond new_sm node.snapshot_cond applied_log
                         else 
                             applied_log
-                    val (status, _, _) = new_sm
+                    val (_, status, _) = new_sm
                     val node = { node with log = snapshot_log, state_machine = new_sm}
                 in 
                     case status of
@@ -227,7 +224,7 @@ let
 
                     (* Message has not been appended before *)
                     hn (("RAFT-UPDATE", x), dialer_id, serial_n) => 
-                        let val (stat, _, _) = node.state_machine
+                        let val (_, stat, _) = node.state_machine
                             val node = case stat of 
                                 SUS => send(dialer_id, ("DIALER-SM-BUSY", serial_n)); node
                                 | DONE => send(dialer_id, ("DIALER-SM-DONE", serial_n)); node
@@ -440,15 +437,9 @@ let
                                 else if lastIncludedIndex <= log_index then false
                                 else true
 
-                            val newlog = if accepting then apply_snapshot node.state_machine_pid x node.log else node.log
+                            val newlog = if accepting then apply_snapshot x node.log else node.log
                             val reject = fn () => send (l_id, ("REJECT", (p_id, {term = term, leader = leader}, (get_log_index newlog))))
                             val ack = fn () => send (l_id, ("ACKNOWLEGDE", (p_id, get_log_index newlog)))
-
-                            val newlog = if accepting then apply_snapshot node.state_machine_pid x node.log else node.log
-                            val reject = 
-                                fn () => send (l_id, ("REJECT", (p_id, {term = node.term, leader = node.leader}, (get_log_index newlog))))
-                            val ack = 
-                                fn () => send (l_id, ("ACKNOWLEGDE", (p_id, get_log_index newlog)))
 
                             val node = {node with term = (if node.term < leader_term then leader_term else node.term)}
                             

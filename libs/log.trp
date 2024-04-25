@@ -123,10 +123,8 @@
         if log.lastApplied < log.commitIndex then
             let val entry = get_nth_command log (log.lastApplied + 1) 
                 val command = entry.command
-                val (status, step, sides) = state_machine
-                val (new_status, new_step, new_sides) = case status of 
-                        DONE => state_machine
-                        | _ => step command
+                val (sides, status, step) = state_machine
+                val (new_sides, new_status, new_step) = step command
                 val log = update_applied log
             in 
                 (if is_leader then
@@ -135,7 +133,7 @@
                     [] => ()
                     | x => map (fn x => x ()) x)
                 else ());
-                apply_log log (new_status, new_step, new_sides) is_leader end
+                apply_log log (new_sides, new_status, new_step) is_leader end
         else (log, state_machine)
 
     (* Get a snapshot of all committed entries *)
