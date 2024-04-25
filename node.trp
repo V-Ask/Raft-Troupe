@@ -74,7 +74,7 @@ let
     val LOCAL_ERROR_TIMEOUT = 4000
     val ELECTION_TIMEOUT_LOWER = 2000
     val ELECTION_TIMEOUT_UPPER = 4000
-    val HEARTBEAT_INTERVAL = 500
+    val HEARTBEAT_INTERVAL = 700
     val DIALER_NOLEADER_TIMEOUT = 500
     val DIALER_NOMSG_TIMEOUT = 2000
 
@@ -679,5 +679,5 @@ let
 
     val default_aliases = ["@node1", "@node2", "@node3"]
 
-in keyval_test7 (fn () => key_val_store_init 5 true)
+in ping_test3 ()
 end

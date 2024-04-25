@@ -39,7 +39,7 @@ let
 
   val ping_hooks = {
     sethook = (fn _ => ()),
-    gethook = (fn (t, call) => case t of "ping" => ("PING",call) | _ => ("GET", call)),
+    gethook = (fn (type, call) => case type of "ping" => ("PING",call) | _ => ("GET", call)),
     snapshot_condition_hook = (fn (log_summary, call) => ("SNAP_COND", (log_summary, call))),
     get_snapshot_hook = (fn callback => ("GET_SNAP", callback)),
     get_changes_hook = (fn callback => ("GET_CHANGES", callback))
