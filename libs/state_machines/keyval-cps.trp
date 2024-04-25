@@ -1,0 +1,48 @@
+import lists
+
+datatype Atoms =
+  GET
+  |SET
+  |WAIT|SUS|DONE
+
+let (* EXPORT START *)
+  fun keyval () = 
+    let 
+      val store = []
+      fun set store (key, value) = let 
+        val store = (key, value) :: store 
+      in (WAIT, main store, []) 
+      end
+      
+
+      and get store key = (WAIT, main store , [first (filter (fn (x,_) => x = key) store)])
+      
+
+      and main store x = case x of 
+        GET => (WAIT, get store, [])
+        | SET => (WAIT, set store, [])
+
+    in (WAIT, main store, []) 
+  end (* EXPORT END *)
+
+  fun test () = let
+    val (state, step, sideeffects) = keyval ()
+    val (state, step, sideeffects) = step SET
+    val (state, step, sideeffects) = step ("x", 1)
+    val (state, step, sideeffects) = step SET
+    val (state, step, sideeffects) = step ("y", 5)
+    val (state, step, sideeffects) = step GET
+    val (state, step, sideeffects) = step "y"
+    val _ = print sideeffects
+    val (state, step, sideeffects) = step SET
+    val (state, step, sideeffects) = step ("y", 3)
+    val (state, step, sideeffects) = step GET
+    val (state, step, sideeffects) = step "y"
+
+    val _ = print sideeffects
+  in ()
+  end
+in test ()
+end
+
+
