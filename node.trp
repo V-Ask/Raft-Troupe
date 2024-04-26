@@ -240,7 +240,7 @@ let
                     hn ("ACKNOWLEGDE", (peer, logIndex)) => 
                         let val node = { node with leader_info = update_match_index node.leader_info peer logIndex }
                             val node = { node with leader_info = update_next_index node.leader_info peer (logIndex + 1) }
-                        in leader_node node end,
+                        in loop (apply_committed node) end,
                     
                     (* If append is unsuccessful *)
                     hn ("REJECT", (peer, terminfo, logIndex)) => 
@@ -310,7 +310,7 @@ let
             (* Append entries for each follower *)
             map (fn x => append_entries x) (filter (fn x => x <> p_id) node.all_nodes);
             start_timeout (fn () => send (p_id, ("SEND_HEARTBEAT", nonce))) HEARTBEAT_INTERVAL;
-            loop (apply_committed node)
+            loop node
     end
 
     and candidate node =
@@ -440,9 +440,12 @@ let
                                 else if lastIncludedIndex <= log_index then false
                                 else true
 
-                            val newlog = if accepting then apply_snapshot x node.log else node.log
-                            val reject = fn () => send (l_id, ("REJECT", (p_id, {term = term, leader = leader}, (get_log_index newlog))))
-                            val ack = fn () => send (l_id, ("ACKNOWLEGDE", (p_id, get_log_index newlog)))
+                            val newlog = if accepting then apply_snapshot node.state_machine_pid x node.log else node.log
+                            val reject = 
+                                fn () => send (l_id, ("REJECT", (p_id, {term = node.term, leader = node.leader}, (get_log_index newlog))))
+                            val ack = 
+                                fn () => send (l_id, ("ACKNOWLEGDE", (p_id, get_log_index newlog)))
+
 
                             val node = {node with term = (if node.term < leader_term then leader_term else node.term)}
                             
