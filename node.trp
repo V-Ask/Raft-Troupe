@@ -85,6 +85,7 @@ let
     val DIALER_NOLEADER_TIMEOUT = 500
     val DIALER_NOMSG_TIMEOUT = 2000
     val DIALER_SM_BUSY_TIMEOUT = 1000
+    val DIALER_RETRIES = 8
 
     fun not a = a = false
     fun send_to_all processes msg sender = map (fn x => send(x, msg)) (filter (fn x => x <> sender) processes)
@@ -229,15 +230,17 @@ let
                                 SUS => send(dialer_id, ("DIALER-SM-BUSY", serial_n)); node
                                 | DONE => send(dialer_id, ("DIALER-SM-DONE", serial_n)); node
                                 | WAIT => 
-                                    let fun replication_cb () = send (dialer_id, ("DIALER-ACK", serial_n))
-                                    in append_update node x replication_cb serial_n end
+                                    if log_is_committed node.log then
+                                        let fun replication_cb () = send (dialer_id, ("DIALER-ACK", serial_n))
+                                        in append_update node x replication_cb serial_n end
+                                    else send(dialer_id, ("DIALER-SM-BUSY", serial_n)); node
                             in leader_node node end,
 
                     (* If append is successful on a follower*)
                     hn ("ACKNOWLEGDE", (peer, logIndex)) => 
                         let val node = { node with leader_info = update_match_index node.leader_info peer logIndex }
                             val node = { node with leader_info = update_next_index node.leader_info peer (logIndex + 1) }
-                        in loop node end,
+                        in leader_node node end,
                     
                     (* If append is unsuccessful *)
                     hn ("REJECT", (peer, terminfo, logIndex)) => 
@@ -597,38 +600,44 @@ let
             end
             val leader = random_leader ()
 
-            fun send_message msg serial_n leader = let 
+            fun send_message msg serial_n leader tries = let 
                 val nonce = mkuuid()
                 val msg_timeout = start_timeout (fn() => send(p_id, ("MESSAGE-TIMEOUT", nonce)))
                 val busy_timeout = start_timeout (fn() => send(p_id, ("BUSY-TIMEOUT", nonce)))
                 fun wait () =
                     receive [
                     hn ("NOT-LEADER", leader_id) => 
-                        send_message msg serial_n leader_id,
+                        send_message msg serial_n leader_id (tries - 1),
                     hn ("DIALER-ACK", other_serial) when other_serial = serial_n => 
                         leader,
                     hn ("DIALER-SM-BUSY", other_serial) when other_serial = serial_n =>
                         busy_timeout DIALER_SM_BUSY_TIMEOUT;
                         wait (),
+                    hn ("DIALER-SM-DONE", other_serial) when other_serial = serial_n =>
+                        printString "State-machine is in its DONE-state";
+                        leader,
                     hn ("MESSAGE-TIMEOUT", x) => 
-                        if x = nonce then send_message msg serial_n (random_leader ())
+                        if x = nonce then send_message msg serial_n (random_leader ()) (tries - 1)
                         else wait (),
                     hn ("BUSY-TIMEOUT", x) => 
-                        if x = nonce then send_message msg serial_n leader
+                        if x = nonce then send_message msg serial_n leader (tries - 1)
                         else wait ()
                 ]
-                in
+                in if tries > 0 then
                     (case leader of
                     () => msg_timeout DIALER_NOLEADER_TIMEOUT
                     | x =>
                         msg_timeout DIALER_NOMSG_TIMEOUT; 
                         send(x, msg));
                     wait ()
+                else
+                    printString "Raft-Dialer: Exceeded maximum sending tries. State-machine might be in an infinite loop."; 
+                    leader
             end
 
             fun update_message x leader = let 
                 val serial_n = mkuuid()
-                in send_message (("RAFT-UPDATE", x), p_id, serial_n) serial_n leader
+                in send_message (("RAFT-UPDATE", x), p_id, serial_n) serial_n leader DIALER_RETRIES
             end
 
             fun loop leader =     
