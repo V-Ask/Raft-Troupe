@@ -85,7 +85,6 @@ let
     val DIALER_NOLEADER_TIMEOUT = 500
     val DIALER_NOMSG_TIMEOUT = 2000
     val DIALER_SM_BUSY_TIMEOUT = 1000
-    val DIALER_RETRIES = 8
 
     fun not a = a = false
     fun send_to_all processes msg sender = map (fn x => send(x, msg)) (filter (fn x => x <> sender) processes)
@@ -603,14 +602,14 @@ let
             end
             val leader = random_leader ()
 
-            fun send_message msg serial_n leader tries = let 
+            fun send_message msg serial_n leader = let 
                 val nonce = mkuuid()
                 val msg_timeout = start_timeout (fn() => send(p_id, ("MESSAGE-TIMEOUT", nonce)))
                 val busy_timeout = start_timeout (fn() => send(p_id, ("BUSY-TIMEOUT", nonce)))
                 fun wait () =
                     receive [
                     hn ("NOT-LEADER", leader_id) => 
-                        send_message msg serial_n leader_id (tries - 1),
+                        send_message msg serial_n leader_id,
                     hn ("DIALER-ACK", other_serial) when other_serial = serial_n => 
                         leader,
                     hn ("DIALER-SM-BUSY", other_serial) when other_serial = serial_n =>
@@ -620,27 +619,23 @@ let
                         printString "State-machine is in its DONE-state";
                         leader,
                     hn ("MESSAGE-TIMEOUT", x) => 
-                        if x = nonce then send_message msg serial_n (random_leader ()) (tries - 1)
+                        if x = nonce then send_message msg serial_n (random_leader ())
                         else wait (),
                     hn ("BUSY-TIMEOUT", x) => 
-                        if x = nonce then send_message msg serial_n leader (tries - 1)
+                        if x = nonce then send_message msg serial_n leader
                         else wait ()
                 ]
-                in if tries > 0 then
-                    (case leader of
+                in (case leader of
                     () => msg_timeout DIALER_NOLEADER_TIMEOUT
                     | x =>
                         msg_timeout DIALER_NOMSG_TIMEOUT; 
                         send(x, msg));
                     wait ()
-                else
-                    printString "Raft-Dialer: Exceeded maximum sending tries. State-machine might be in an infinite loop."; 
-                    leader
             end
 
             fun update_message x leader = let 
                 val serial_n = mkuuid()
-                in send_message (("RAFT-UPDATE", x), p_id, serial_n) serial_n leader DIALER_RETRIES
+                in send_message (("RAFT-UPDATE", x), p_id, serial_n) serial_n leader
             end
 
             fun loop leader =     
