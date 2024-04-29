@@ -7,7 +7,7 @@ let
 
     fun send_n_updates raft n =
         let fun loop n =
-            send(raft, ("RAFT-UPDATE", ("TEST", "TEST")));
+            send(raft, (RAFT_UPDATE, ("TEST", "TEST")));
             print n;
             sleep 10;
             if n > 1 then loop (n - 1) else () 
@@ -16,7 +16,7 @@ let
 
     fun send_n_unique_updates raft n =
         let fun loop n =
-            send(raft, ("RAFT-UPDATE", (mkuuid(), "TEST")));
+            send(raft, (RAFT_UPDATE, (mkuuid(), "TEST")));
             print n;
             sleep 10;
             if n > 1 then loop (n - 1) else ()
@@ -30,30 +30,30 @@ let
     fun keyval_test1 raft_func = 
         let val raft = raft_func ()
         in
-            send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
-            send_delay(raft, ("RAFT-UPDATE", ("Hello", "There"))) 500;
-            send_delay(raft, ("SEND-TO-NTH", 1, "debug-pause")) 1000;
+            send(raft, (SEND_TO_NTH, 1, DEBUG_TIMEOUT));
+            send_delay(raft, (RAFT_UPDATE, ("Hello", "There"))) 500;
+            send_delay(raft, (SEND_TO_NTH, 1, DEBUG_PAUSE)) 1000;
             print "killing I";
-            send_delay(raft, ("RAFT-UPDATE", ("Hello", "World"))) 500;
-            send_delay(raft, ("SEND-TO-NTH", 1, "debug-continue")) 8000;
+            send_delay(raft, (RAFT_UPDATE, ("Hello", "World"))) 500;
+            send_delay(raft, (SEND_TO_NTH, 1, DEBUG_CONTINUE)) 8000;
             print "reviving I";
-            send(raft, ("SEND-TO-NTH", 1, ("RAFT-UPDATE", ("Hello", "Other World"))));
-            send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 2000
+            send(raft, (SEND_TO_NTH, 1, (RAFT_UPDATE, ("Hello", "Other World"))));
+            send_delay(raft, (SEND_TO_ALL, DEBUG_PRINTLOG)) 2000
     end
 
     fun keyval_test2 raft_func = 
         let val raft = raft_func ()
         in 
-            send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
-            send(raft, ("SEND-TO-NTH", 2, "debug-timeout"));
-            send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 1000
+            send(raft, (SEND_TO_NTH, 1, DEBUG_TIMEOUT));
+            send(raft, (SEND_TO_NTH, 2, DEBUG_TIMEOUT));
+            send_delay(raft, (SEND_TO_ALL, DEBUG_PRINTLOG)) 1000
     end
 
     fun keyval_test3 raft_func = 
         let val p_id = self()
             val raft = raft_func ()
         in 
-            send_delay(raft, ("RAFT-UPDATE", ("A", 42))) 2000;
+            send_delay(raft, (RAFT_UPDATE, ("A", 42))) 2000;
             send_delay(raft, ("RAFT-GET", ("A", p_id))) 1000;
             receive [hn x => print x]
     end
@@ -61,40 +61,40 @@ let
     fun keyval_test4 raft_func = 
         let val raft = raft_func ()
         in
-            send_delay(raft, ("RAFT-UPDATE", ("Hello", "There"))) 2000;
-            send_delay(raft, ("RAFT-UPDATE", ("Hello", "There"))) 1000;
-            send_delay(raft, ("RAFT-UPDATE", ("Hello", "There"))) 1000;
-            send_delay(raft, ("RAFT-UPDATE", ("Hello", "There"))) 1000;
-            send_delay(raft, ("RAFT-UPDATE", ("Hello", "There"))) 1000;
-            send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 4000
+            send_delay(raft, (RAFT_UPDATE, ("Hello", "There"))) 2000;
+            send_delay(raft, (RAFT_UPDATE, ("Hello", "There"))) 1000;
+            send_delay(raft, (RAFT_UPDATE, ("Hello", "There"))) 1000;
+            send_delay(raft, (RAFT_UPDATE, ("Hello", "There"))) 1000;
+            send_delay(raft, (RAFT_UPDATE, ("Hello", "There"))) 1000;
+            send_delay(raft, (SEND_TO_ALL, DEBUG_PRINTLOG)) 4000
     end
 
     fun keyval_test5 raft_func =
         let val raft = raft_func ()
         in
-            send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
+            send(raft, (SEND_TO_NTH, 1, DEBUG_TIMEOUT));
             send_n_updates raft 51;
-            send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 5000
+            send_delay(raft, (SEND_TO_ALL, DEBUG_PRINTLOG)) 5000
     end
 
     fun keyval_test6 raft_func = 
         let val raft = raft_func ()
         in 
-            send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
-            send_delay(raft, ("RAFT-UPDATE", ("A", 2))) 1000;
-            send_delay(raft, ("RAFT-UPDATE", ("A", 3))) 500;
-            send_delay(raft, ("RAFT-UPDATE", ("A", 4))) 10;
-            send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 5000
+            send(raft, (SEND_TO_NTH, 1, DEBUG_TIMEOUT));
+            send_delay(raft, (RAFT_UPDATE, ("A", 2))) 1000;
+            send_delay(raft, (RAFT_UPDATE, ("A", 3))) 500;
+            send_delay(raft, (RAFT_UPDATE, ("A", 4))) 10;
+            send_delay(raft, (SEND_TO_ALL, DEBUG_PRINTLOG)) 5000
     end
 
     fun keyval_test7 raft_func =
         let val raft = raft_func ()
             val p_id = self()
         in
-            send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
+            send(raft, (SEND_TO_NTH, 1, DEBUG_TIMEOUT));
             send_delay(raft, ("RAFT-GET", ("B", p_id))) 1500;
             receive [ hn x => print x ];
-            send_delay(raft, ("RAFT-UPDATE", ("B", 2))) 1000;
+            send_delay(raft, (RAFT_UPDATE, ("B", 2))) 1000;
             send_delay(raft, ("RAFT-GET", ("B", p_id))) 1500;
             receive [ hn x => print x ]
     end
@@ -102,26 +102,26 @@ let
     fun keyval_test_snapshot raft_func =
         let val raft = raft_func ()
         in 
-            send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
-            send_delay(raft, ("SEND-TO-NTH", 3, "debug-pause")) 100;
+            send(raft, (SEND_TO_NTH, 1, DEBUG_TIMEOUT));
+            send_delay(raft, (SEND_TO_NTH, 3, DEBUG_PAUSE)) 100;
             print "sending 1";
-            send(raft, ("RAFT-UPDATE", ("A", 1)));
+            send(raft, (RAFT_UPDATE, ("A", 1)));
             print "sending 2";
-            send_delay(raft, ("RAFT-UPDATE", ("A", 2))) 50;
+            send_delay(raft, (RAFT_UPDATE, ("A", 2))) 50;
             print "sending 3";
-            send_delay(raft, ("RAFT-UPDATE", ("A", 4))) 50;
-            send_delay(raft, ("SEND-TO-NTH", 1, "debug-printlog")) 1000;
-            send_delay(raft, ("SEND-TO-NTH", 1, "debug-applysnapshot")) 5000;
-            send_delay(raft, ("SEND-TO-NTH", 1, "debug-printlog")) 1000
+            send_delay(raft, (RAFT_UPDATE, ("A", 4))) 50;
+            send_delay(raft, (SEND_TO_NTH, 1, DEBUG_PRINTLOG)) 1000;
+            send_delay(raft, (SEND_TO_NTH, 1, DEBUG_APPLYSNAPSHOT)) 5000;
+            send_delay(raft, (SEND_TO_NTH, 1, DEBUG_PRINTLOG)) 1000
     end
 
     fun keyval_test_lots_of_messages raft_func = 
         let val raft = raft_func ()
         in 
-            send(raft, ("SEND-TO-NTH", 1, "debug-timeout"));
+            send(raft, (SEND_TO_NTH, 1, DEBUG_TIMEOUT));
             sleep 1000;
             send_n_updates raft 1000;
-            send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 5000
+            send_delay(raft, (SEND_TO_ALL, DEBUG_PRINTLOG)) 5000
     end
 
     fun keyval_test_lots_of_unique_messages raft_func = 
@@ -129,7 +129,7 @@ let
         in
             sleep 5000;
             send_n_unique_updates raft 1000;
-            send_delay(raft, ("SEND-TO-ALL", "debug-printlog")) 1000
+            send_delay(raft, (SEND_TO_ALL, DEBUG_PRINTLOG)) 1000
     end
 
     (* Application of the local Raft algorithm on a key-value-store*)
