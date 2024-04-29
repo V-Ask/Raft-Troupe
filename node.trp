@@ -713,7 +713,18 @@ let
 
     (* #IMPORT libs/tests/simple-cps-tests.trp *)
 
+    (* #IMPORT ./libs/state_machines/ping.trp *)
+
+    (* #IMPORT ./libs/state_machines/keyval-cps.trp *)
+
+    (* #IMPORT ./libs/tests/ping-tests.trp *)
+
+
     val default_aliases = ["@node1", "@node2", "@node3"]
 
+<<<<<<< HEAD
 in ()
+=======
+in ping_test2 ()
+>>>>>>> 0506a58 (Jeg er sej)
 end

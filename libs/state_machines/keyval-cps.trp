@@ -9,7 +9,7 @@ let (* EXPORT START *)
 
       fun set store (key, value) () = let 
         val store = (key, value) :: store 
-      in ([], WAIT, main store, ) 
+      in ([], WAIT, main store) 
       end
       
 
