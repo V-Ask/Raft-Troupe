@@ -86,6 +86,7 @@ datatype Atoms =
 
                 | DEBUG_PRINTLOG | DEBUG_PAUSE | DEBUG_CONTINUE | DEBUG_APPLYSNAPSHOT | DEBUG_SNAPSHOT_COND | DEBUG_TIMEOUT
 
+                | FUNCTION_DONE
 
 let 
     (* Constants *)
@@ -142,7 +143,7 @@ let
             start_timeout (fn () => send(p_id, ("ERROR_TIMEOUT", nonce))) LOCAL_ERROR_TIMEOUT;
             spawn (fn () => 
                 let val x = func ()
-                in send(p_id, ("FUNCTION_DONE", nonce, x)) end);
+                in send(p_id, (FUNCTION_DONE, nonce, x)) end);
             receive [
                 hn ("ERROR_TIMEOUT", x) when x = nonce => 
                     printString "==========================";
@@ -152,7 +153,7 @@ let
                     printString "==========================";
                     (* TODO: THIS IS WHERE A THREAD MUST BE KILLED *)
                     default,
-                hn ("FUNCTION_DONE", x, output) when x = nonce =>
+                hn (FUNCTION_DONE, x, output) when x = nonce =>
                     output
             ]
     end
@@ -708,12 +709,14 @@ let
     fun raft n state_machine snapshot_cond client_id verbose =
         let val nodes = raft_spawn n state_machine snapshot_cond verbose
         in raft_dial nodes client_id
+    end
 
     (* #IMPORT libs/state_machines/simple-cps.trp *)
 
     (* #IMPORT libs/tests/simple-cps-tests.trp *)
 
     (* #IMPORT ./libs/state_machines/ping.trp *)
+    (* #IMPORT ./libs/state_machines/pong.trp *)
 
     (* #IMPORT ./libs/state_machines/keyval-cps.trp *)
 
@@ -722,9 +725,5 @@ let
 
     val default_aliases = ["@node1", "@node2", "@node3"]
 
-<<<<<<< HEAD
 in ()
-=======
-in ping_test2 ()
->>>>>>> 0506a58 (Jeg er sej)
 end

@@ -128,7 +128,7 @@
             (DIALER_ADD, dialer_id) => 
                 (if is_leader then entry.callback ()
                 else ());
-                apply_log log state_machine (dialers :: [dialer_id]) is_leader
+                apply_log log state_machine (dialer_id :: dialers) is_leader
             | _ =>
                 let val (sides, status, step) = state_machine
                     val (new_sides, new_status, new_step) = step command
@@ -137,7 +137,7 @@
                         (case new_sides of
                         [] => ()
                         | x => map (fn x => map (fn dialer  => send(dialer,
-                        (DIALER_CLIENT_MSG, x, log.lastApplied)))) x)
+                        (DIALER_CLIENT_MSG, x, log.lastApplied))) dialers) x)
                     else ());
                 apply_log log (new_sides, new_status, new_step) dialers is_leader end
             end

@@ -1,0 +1,13 @@
+datatype Atoms = WAIT|SUS|DONE
+
+let (* EXPORT START *)
+    fun main x = case x of
+    ("pong", x) => sleep 5; ([(RAFT_UPDATE, ("ping", x + 1))], WAIT, main)
+    |_ => ([], WAIT, main)
+
+    fun pong_server () =
+        ([], WAIT, main)
+
+    (* EXPORT END *)
+in ()
+end

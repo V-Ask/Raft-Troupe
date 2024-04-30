@@ -3,26 +3,12 @@ datatype Atoms = WAIT|SUS|DONE
 
 let (* EXPORT START *)
 
-  fun main x = case x of
-    (callback, ("ping", x)) => ([], SUS, ping (callback, x))
-    |_ => ([], WAIT, main)
-
-  and ping (callback, x) () = ([fn () => send (callback, ("pong", x + 1))], WAIT, main)
+    fun main x = case x of
+        ("ping", x) => sleep 25; ([(RAFT_UPDATE, ("pong", x))], WAIT, main)
+        |_ => ([], WAIT, main)
   
-  fun ping_server () = ([], WAIT, main)
+    fun ping_server () =
+        ([], WAIT, main)
   (* EXPORT END *)
-
-  fun test () = let 
-    val (sidefx, status, step) = ping_server ()
-    val _ = print status
-    val (sidefx, status, step) = step "test"
-    val _ = print status
-    val (sidefx, status, step) = step (self (), ("ping", 2))
-    val _ = print sidefx
-    val _ = print status
-    val (sidefx, status, step) = step ()
-    val _ = map (fn x => x ()) sidefx
-    val _ = print (receive [hn x => x])
-  in () end
-
-in test () end
+in ()
+end
