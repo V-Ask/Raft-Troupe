@@ -1,12 +1,12 @@
 datatype Atoms = WAIT|SUS|DONE
 
 let (* EXPORT START *)
-    fun main x = case x of
-    ("pong", x) => sleep 5; ([(RAFT_UPDATE, ("ping", x + 1))], WAIT, main)
+    fun main dialer x = case x of
+    (callback, "pong", x) => sleep 5; ([(RAFT_UPDATE, ("ping", x + 1))], WAIT, main)
     |_ => ([], WAIT, main)
 
-    fun pong_server () =
-        ([], WAIT, main)
+    fun pong_server cluster =
+        ([], WAIT, main (raft_dial cluster (self())))
 
     (* EXPORT END *)
 in ()

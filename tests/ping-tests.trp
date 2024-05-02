@@ -26,17 +26,10 @@ in loop 1 end *)
 fun ping_pong_cluster_test () = 
     let val pid = self ()
         val ping_cluster = raft_spawn 5 (ping_server ()) (fn log => log.entries_since_snap > 10) false 
-        val pong_cluster = raft_spawn 5 (pong_server ()) (fn log => log.entries_since_snap > 10) false
-        val ping_dial = raft_dial ping_cluster pid
-        val pong_dial = raft_dial pong_cluster pid
+        val pong_cluster = raft_spawn 5 (pong_server ping_cluster) (fn log => log.entries_since_snap > 10) false
+        val pong_dial = raft_dial pong_cluster
 
-        fun read_ping_pongs () = receive [
-            hn (RAFT_UPDATE, x) => print x; read_ping_pongs (),
-            hn _ => read_ping_pongs ()
-        ]
     in
-        raft_dial ping_cluster pong_dial;
-        raft_dial pong_cluster ping_dial;
         send_delay(ping_dial, (RAFT_UPDATE, ("ping", 1))) 5000;
         printString "starting ping-pong";
         read_ping_pongs ()
