@@ -2,15 +2,15 @@
 
 fun ping_test () = let 
   val pid = self ()
-  val raft = raft 5 (ping_server ()) (fn log => log.entries_since_snap > 10) pid true 
+  val (dialer, cluster) = raft 5 (ping_server ()) (fn log => log.entries_since_snap > 10) pid true 
 in 
   print "Sending";
-  send (raft, (RAFT_UPDATE,(pid, ("ping", 3))));
+  send (dialer, (RAFT_UPDATE, (dialer, "ping", 3)));
   print (receive [hn x => x]);
-  send (raft, (RAFT_UPDATE,(pid, ("test", 3))));
-  send (raft, (RAFT_UPDATE,(pid, ("ping", 7))));
+  send (dialer, (RAFT_UPDATE,(dialer, "test", 3)));
+  send (dialer, (RAFT_UPDATE,(dialer, "ping", 7)));
 
-  send (raft, (SEND_TO_ALL, DEBUG_PRINTLOG))
+  send (dialer, (SEND_TO_ALL, DEBUG_PRINTLOG))
 end
 
 (* fun ping_test2 () = let 

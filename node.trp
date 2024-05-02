@@ -61,7 +61,6 @@ import lists
         snapshot_condition: fn logSummary => ... : boolean
         state_machine: ([SIDE-EFFECTS], STATUS, STEP-FUNC)
         total_nodes: int,
-        dialers: [process_id],
         verbose: boolean
     }
 *)
@@ -70,7 +69,6 @@ datatype Atoms =
                 WAIT | SUS | DONE
                 | SEND_HEARTBEAT 
                 | RAFT_UPDATE 
-                | DIAL
                 | NOT_LEADER
                 | ACKNOWLEDGE
                 | REJECT
@@ -79,7 +77,7 @@ datatype Atoms =
                 | APPEND_ENTRIES | SNAPSHOT
                 | ADD_NODES
 
-                | DIALER_ACK | DIALER_SM_BUSY | DIALER_SM_DONE | DIALER_CLIENT_MSG | DIALER_ADD
+                | DIALER_ACK | DIALER_SM_BUSY | DIALER_SM_DONE | DIALER_CLIENT_MSG
                 | DIALER_MESSAGE_TIMEOUT | DIALER_BUSY_TIMEOUT 
 
                 | SEND_TO_NTH | SEND_TO_ALL
@@ -87,6 +85,8 @@ datatype Atoms =
                 | DEBUG_PRINTLOG | DEBUG_PAUSE | DEBUG_CONTINUE | DEBUG_APPLYSNAPSHOT | DEBUG_SNAPSHOT_COND | DEBUG_TIMEOUT
 
                 | FUNCTION_DONE
+
+                | ERROR_TIMEOUT
 
 let 
     (* Constants *)
@@ -140,12 +140,12 @@ let
         let val p_id = self()
             val nonce = mkuuid()
         in 
-            start_timeout (fn () => send(p_id, ("ERROR_TIMEOUT", nonce))) LOCAL_ERROR_TIMEOUT;
+            start_timeout (fn () => send(p_id, (ERROR_TIMEOUT, nonce))) LOCAL_ERROR_TIMEOUT;
             spawn (fn () => 
                 let val x = func ()
                 in send(p_id, (FUNCTION_DONE, nonce, x)) end);
             receive [
-                hn ("ERROR_TIMEOUT", x) when x = nonce => 
+                hn (ERROR_TIMEOUT, x) when x = nonce => 
                     printString "==========================";
                     printString "Timeout-Error on func:";
                     print func;
@@ -212,14 +212,14 @@ let
                 let val prev_commit = node.log.commitIndex
                     val highest_commit = calc_highest_commit (map (fn x => x.match) node.leader_info.matchIndex)
                     val node = { node with log = update_commit node.log highest_commit }
-                    val (applied_log, new_sm, dialers) = apply_log node.log node.state_machine node.dialers true
+                    val (applied_log, new_sm) = apply_log node.log node.state_machine true
                     val snapshot_log = 
                         if prev_commit < highest_commit then 
                             evaluate_snapshot_cond new_sm node.snapshot_cond applied_log
                         else 
                             applied_log
                     val (_, status, _) = new_sm
-                    val node = { node with log = snapshot_log, state_machine = new_sm, dialers = dialers}
+                    val node = { node with log = snapshot_log, state_machine = new_sm}
                 in 
                     case status of
                     SUS => if log_is_committed node.log then append_update node () (fn () => ()) (mkuuid()) else node
@@ -289,10 +289,6 @@ let
                     hn (APPEND_ENTRIES, x, l_id, other_term, prevIndex, prevTerm, commitIndex) when other_term > node.term => 
                         verbose_print (node.id^": received AppendEntries from leader, I must have lost position") node.verbose;
                         follower (demote other_term l_id () node),
-
-                    hn (DIAL, dialer_id, serial_n) =>
-                        let fun replication_cb () = send (dialer_id, (DIALER_ACK, serial_n))
-                        in loop (append_update node (DIALER_ADD, dialer_id) (replication_cb) (serial_n)) end,
                     
                     (* Prints log *)
                     hn DEBUG_PRINTLOG =>
@@ -502,7 +498,7 @@ let
                                 fn () => send (l_id, (ACKNOWLEDGE, (p_id, get_log_index newlog)))
 
                             val node = {node with term = (if node.term < leader_term then leader_term else node.term)}
-                            val (newlog, new_sm, dialers) = apply_log newlog node.state_machine node.dialers false
+                            val (newlog, new_sm) = apply_log newlog node.state_machine false
                         in 
                             (if accepting then ack ()
                                     else 
@@ -513,9 +509,6 @@ let
 
                     (* If client sends update, sends the leader's id *)
                     hn ((RAFT_UPDATE, x), dialer_id, _) => 
-                        send(dialer_id, (NOT_LEADER, node.leader)),
-
-                    hn (DIAL, dialer_id, _) =>
                         send(dialer_id, (NOT_LEADER, node.leader)),
 
                     (* Prints the log *)
@@ -563,7 +556,6 @@ let
             state_machine = state_machine,
             snapshot_cond = snapshot_cond,
             node_amount = node_amount,
-            dialers = [],
             verbose = verbose
         }
         in dormant_node node
@@ -651,40 +643,33 @@ let
                     wait ()
             end
 
-            fun dial_message () =
-                let val serial_n = mkuuid()
-                in send_message (DIAL, p_id, serial_n) serial_n (random_leader ())
-            end
-
             fun update_message x leader = let 
                 val serial_n = mkuuid()
                 in send_message ((RAFT_UPDATE, x), p_id, serial_n) serial_n leader
             end
 
-            val leader = dial_message ()
+            val leader = random_leader ()
 
-            fun loop leader last_seq =     
+            fun loop leader prev_log prev_seq =     
                 receive [
                     hn (RAFT_UPDATE, x) =>
-                        loop (update_message x leader) last_seq,
+                        loop (update_message x leader) prev_log prev_seq,
 
-                    hn (DIALER_CLIENT_MSG, msg, seq_number) =>
-                        (if last_seq < seq_number then
+                    hn (DIALER_CLIENT_MSG, (msg, log_index, seq_index)) =>
+                        (if prev_log < log_index orelse (log_index = prev_log andalso seq_index > prev_seq) then
                             send(client_id, msg);
-                            loop leader seq_number
-                        else loop leader last_seq);
-                        loop leader seq_number,
+                            loop leader log_index seq_index
+                        else print (prev_log, prev_seq); loop leader prev_log prev_seq),
 
                     hn (SEND_TO_NTH, n, x) =>
                         send_to_nth cluster x n;
-                        loop leader last_seq,
+                        loop leader prev_log prev_seq,
 
                     hn (SEND_TO_ALL, x) => 
-                        print "ALRIGHT";
                         send_to_all cluster x (self());
-                        loop leader last_seq,
-                    hn _ => loop leader last_seq ]
-        in loop leader 0
+                        loop leader prev_log prev_seq,
+                    hn _ => loop leader prev_log prev_seq ]
+        in loop leader 0 0
     end
 
     (* Spawns a distributed Raft network, which can be dialed into to
@@ -708,7 +693,7 @@ let
 
     fun raft n state_machine snapshot_cond client_id verbose =
         let val nodes = raft_spawn n state_machine snapshot_cond verbose
-        in raft_dial nodes client_id
+        in (raft_dial nodes client_id, nodes)
     end
 
     (* #IMPORT libs/state_machines/simple-cps.trp *)
