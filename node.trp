@@ -698,14 +698,14 @@ let
 
     (* #IMPORT libs/state_machines/simple-cps.trp *)
 
-    (* #IMPORT libs/tests/simple-cps-tests.trp *)
+    (* #IMPORT tests/simple-cps-tests.trp *)
 
     (* #IMPORT ./libs/state_machines/ping.trp *)
     (* #IMPORT ./libs/state_machines/pong.trp *)
 
     (* #IMPORT ./libs/state_machines/keyval-cps.trp *)
 
-    (* #IMPORT ./libs/tests/ping-tests.trp *)
+    (* #IMPORT ./tests/ping-tests.trp *)
 
 
     val default_aliases = ["@node1", "@node2", "@node3"]
