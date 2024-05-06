@@ -28,17 +28,15 @@ fun ping_pong_cluster_test () =
         val ping_cluster = raft_spawn 5 (ping_server ()) (fn log => log.entries_since_snap > 10) false 
         val pong_cluster = raft_spawn 5 (pong_server ()) (fn log => log.entries_since_snap > 10) false
         
-        val ping_test = raft_dial_and_bind ping_cluster pid
-        val pong_test = raft_dial_and_bind pong_cluster pid
-        val ping = raft_dial ping_cluster
-        val pong = raft_dial_and_bind pong_cluster ping
+        val ping_test = raft_dial ping_cluster pid
+        val pong_test = raft_dial pong_cluster pid
+        val (ping, pong) = raft_dial_clusters ping_cluster pong_cluster
 
         fun read_pingpong () =
           receive [
             hn x => print x; read_pingpong ()
           ]
     in 
-        set_dialer_client ping pong;
         send_delay(ping, (RAFT_UPDATE, (ping, "dialer"))) 5000;
         send(ping, (RAFT_UPDATE, (ping_test, "dialer")));
         send(pong, (RAFT_UPDATE, (pong, "dialer")));

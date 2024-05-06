@@ -689,29 +689,30 @@ let
         initiate_nodes n state_machine snapshot_cond verbose
 
     (* Creates a dormant dialer *)
-    fun raft_dial nodes =
-        spawn(fn () => dormant_dialer nodes)
-
-    (* Binds a dialer with a client *)
-    fun set_dialer_client dialer_id client_id =
-        send(dialer_id, (DIAL, client_id))
-
-    (* Dials into a Raft network as client *)
-    fun raft_dial_and_bind nodes client_id =
-        let val pid = raft_dial nodes
-        in
-            set_dialer_client pid client_id;
+    fun raft_dial nodes client = 
+        let val pid = spawn(fn () => dormant_dialer nodes)
+        in 
+            send(pid, (DIAL, client));
             pid
+    end
+
+    fun raft_dial_clusters cluster1 cluster2 =
+        let val dial1 = spawn(fn () => dormant_dialer cluster1)
+            val dial2 = spawn(fn () => dormant_dialer cluster2)
+        in
+            send(dial1, (DIAL, dial2));
+            send(dial2, (DIAL, dial1));
+            (dial1, dial2)
     end
 
     fun raft_d aliases state_machine snapshot_cond client_id verbose =
         let val nodes = raft_spawn_alias aliases state_machine snapshot_cond verbose
-        in (raft_dial_and_bind nodes client_id, nodes)
+        in (raft_dial nodes client_id, nodes)
     end
 
     fun raft n state_machine snapshot_cond client_id verbose =
         let val nodes = raft_spawn n state_machine snapshot_cond verbose
-        in (raft_dial_and_bind nodes client_id, nodes)
+        in (raft_dial nodes client_id, nodes)
     end
 
     (* #IMPORT libs/state_machines/simple-cps.trp *)
