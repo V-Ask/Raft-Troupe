@@ -486,6 +486,7 @@ let
                                 else if (get_latest_log_term node.log) <> prevLogTerm andalso prevLogTerm > 0 then 
                                     false
                                 else true
+                            val prev_commit = node.log.commitIndex
                             val newlog = 
                                 if accepting then
                                     let val log = rollback_log_to node.log latestLogIndex
@@ -499,37 +500,46 @@ let
                                 fn () => send (l_id, (ACKNOWLEDGE, (p_id, get_log_index newlog)))
 
                             val node = {node with term = (if node.term < leader_term then leader_term else node.term)}
-                            val (newlog, new_sm) = apply_log newlog node.state_machine false
+                            val (applied_log, new_sm) = apply_log newlog node.state_machine false
+                            val snapshot_log = 
+                                if prev_commit < applied_log.commitIndex then 
+                                    evaluate_snapshot_cond new_sm node.snapshot_cond applied_log
+                                else 
+                                    applied_log
                         in 
                             (if accepting then ack ()
                                     else 
                                         verbose_print (node.id^": REJECTING") node.verbose;
                                         reject ());
-                            follower {node with log = newlog, state_machine = new_sm}
+                            follower {node with log = snapshot_log, state_machine = new_sm}
                         end,
 
                     (* If client sends update, sends the leader's id *)
                     hn ((RAFT_UPDATE, x), dialer_id, _) => 
-                        send(dialer_id, (NOT_LEADER, node.leader)),
+                        send(dialer_id, (NOT_LEADER, node.leader));
+                        loop node,
 
                     (* Prints the log *)
                     hn (DEBUG_PRINTLOG) =>
-                        pretty_print_log node.id node.log,
+                        pretty_print_log node.id node.log;
+                        loop node,
 
                     (* Halts the follower *)
                     hn (DEBUG_PAUSE) =>
-                        let fun loop () = receive [
+                        let fun paused () = receive [
                             hn (DEBUG_CONTINUE) => (),
-                            hn x => loop ()
+                            hn _ => paused ()
                         ]
-                        in loop () end,
+                        in
+                            paused ();
+                            loop node
+                        end,
 
                     (* Start an election, electing this follower to a candidate *)
                     hn (DEBUG_TIMEOUT) => start_election (),
-                    hn _ => 
-                        loop node
+                    hn _ => loop node
             ]
-            in loop node
+            in ()
         end
         in loop node
     end

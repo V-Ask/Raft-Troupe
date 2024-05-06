@@ -42,6 +42,6 @@ fun ping_pong_cluster_test () =
         send(pong, (RAFT_UPDATE, (pong, "dialer")));
         send(pong, (RAFT_UPDATE, (pong_test, "dialer")));
         send(pong, (RAFT_UPDATE, ("pong", 0)));
-        send_delay (pong_test, (SEND_TO_ALL, DEBUG_PRINTLOG)) 10000
+        read_pingpong()
 end
 (* EXPORT END*)
