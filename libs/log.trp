@@ -20,6 +20,7 @@
 
     fun pretty_print_log id log = 
         printString "\n========******========";
+        print (length log.log);
         printString ("ID: "^id);
         printString "----------------------";
         printString "Entries (term, message):";

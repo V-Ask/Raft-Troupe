@@ -41,8 +41,7 @@ fun ping_pong_cluster_test () =
         send(ping, (RAFT_UPDATE, (ping_test, "dialer")));
         send(pong, (RAFT_UPDATE, (pong, "dialer")));
         send(pong, (RAFT_UPDATE, (pong_test, "dialer")));
-        printString "adding dialers";
         send(pong, (RAFT_UPDATE, ("pong", 0)));
-        read_pingpong ()
+        send_delay (pong_test, (SEND_TO_ALL, DEBUG_PRINTLOG)) 10000
 end
 (* EXPORT END*)
