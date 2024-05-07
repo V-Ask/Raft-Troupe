@@ -7,7 +7,7 @@ import lists
         lastApplied: int,
         internalChanges: int,
         commitIndex: int,
-        lastMessageSerial: string
+        latestSerials: SerialKey[]
     }
     Snapshot = {
         snapshot: Some state
@@ -18,6 +18,10 @@ import lists
         term: int,
         command: message,
         serial: string
+    }
+    SerialKey = {
+        id: clusterId[] | pid,
+        key: (logIndex, number) | nonce
     }
 *)
 
@@ -46,7 +50,6 @@ import lists
         log_size: int,
         entries_since_snap: int
     }
-
 *)
 
 (*
@@ -62,6 +65,13 @@ import lists
         state_machine: ([SIDE-EFFECTS], STATUS, STEP-FUNC)
         total_nodes: int,
         verbose: boolean
+    }
+*)
+
+(*
+    RaftProcesses = {
+        type: Client | Cluster,
+        id: pid | Clusterid[]
     }
 *)
 
@@ -88,6 +98,7 @@ datatype Atoms =
                 | FUNCTION_DONE
 
                 | ERROR_TIMEOUT
+                | CLUSTER | CLIENT
 
 let 
     (* Constants *)
@@ -116,7 +127,6 @@ let
     (* #IMPORT libs/quickselect.trp *)
 
     (* #IMPORT libs/log.trp *)
-
 
     (* #IMPORT libs/leader-info.trp *)
 
@@ -161,7 +171,146 @@ let
 
     (* Starts a random timeout with lower=2sec and upper=4sec *)
     fun start_random_timeout func = start_timeout func (ELECTION_TIMEOUT_LOWER + ((random ()) * (ELECTION_TIMEOUT_UPPER - ELECTION_TIMEOUT_LOWER)))
-    
+
+    fun random_element list =
+        let fun roundUp n m = 
+                if n <= 0 then m else roundUp (n - 1) (m + 1)
+            val r_n = roundUp (random() * (length list - 1)) 0 
+        in nth list r_n
+    end
+
+    fun apply_serialkey list key =
+        case list of
+        [] => (true, key)
+        | h :: t =>
+            if h = key then
+                case (h.key, key.key) of
+                ((log_index, seq_numb), (new_log_index, new_seq_numb)) =>
+                    if new_log_index > log_index orelse 
+                        (log_index = new_log_index andalso new_seq_numb > seq_numb) then
+                        (true, ({ h with key = key.key } :: t))
+                    else (false, h :: t)
+                | (nonce, new_nonce) =>
+                    if nonce <> new_nonce then
+                        (true, ({ h with key = key.key } :: t))
+                    else (false, h :: t)
+                | _ => (true, ({ h with key = key.key } :: t))
+            else 
+                let val (cond, list) = apply_serialkey t key
+                in (cond, h :: list)
+            end
+
+    fun dialer_send_message p_id msg serial_n leader cluster = 
+        let val nonce = mkuuid()
+            val msg_timeout = start_timeout (fn() => send(p_id, (DIALER_MESSAGE_TIMEOUT, nonce)))
+            val busy_timeout = start_timeout (fn() => send(p_id, (DIALER_BUSY_TIMEOUT, nonce)))
+            fun wait () =
+                receive [
+                hn (NOT_LEADER, leader_id) => 
+                    dialer_send_message p_id msg serial_n leader_id cluster,
+                hn (DIALER_ACK, other_serial) when other_serial = serial_n => 
+                    leader,
+                hn (DIALER_SM_BUSY, other_serial) when other_serial = serial_n =>
+                    busy_timeout DIALER_SM_BUSY_TIMEOUT;
+                    wait (),
+                hn (DIALER_SM_DONE, other_serial) when other_serial = serial_n =>
+                    printString "State-machine is in its DONE-state";
+                    leader,
+                hn (DIALER_MESSAGE_TIMEOUT, x) => 
+                    if x = nonce then dialer_send_message p_id msg serial_n (random_element cluster) cluster
+                    else wait (),
+                hn (DIALER_BUSY_TIMEOUT, x) => 
+                    if x = nonce then dialer_send_message p_id msg serial_n leader cluster
+                    else wait ()
+            ]
+            in (case leader of
+                () => msg_timeout DIALER_NOLEADER_TIMEOUT
+                | x =>
+                    msg_timeout DIALER_NOMSG_TIMEOUT; 
+                    send(x, msg));
+                wait ()
+    end
+
+    (* Facilitates client-side interaction to the Raft cluster *)
+    fun dialer cluster client_id = 
+        let val p_id = self()
+            fun update_message x leader = let 
+                val serial_n = mkuuid()
+                in dialer_send_message p_id ((RAFT_UPDATE, x), p_id, serial_n) serial_n leader cluster
+            end
+            val leader = random_element cluster
+
+            fun loop leader sks =     
+                receive [
+                    hn (RAFT_UPDATE, x) =>
+                        loop (update_message x leader) sks,
+
+                    hn (DIALER_CLIENT_MSG, msg, sk) =>
+                        let val (cond, sks) = apply_serialkey sks sk
+                        in 
+                            (if cond then send(client_id, msg)
+                            else ());
+                            loop leader sks
+                    end,
+
+                    hn (SEND_TO_NTH, n, x) =>
+                        send_to_nth cluster x n;
+                        loop leader sks,
+
+                    hn (SEND_TO_ALL, x) => 
+                        send_to_all cluster x (self());
+                        loop leader sks,
+                    hn _ => loop leader sks ]
+        in loop leader []
+    end
+
+    fun dormant_dialer nodes =
+        receive [
+            hn (DIAL, pid) => dialer nodes pid
+        ]
+
+    fun leader_dialer cluster msgs = 
+        let val p_id = self()
+            val leader = random_element cluster
+        in 
+            map (fn (msg, serial) => dialer_send_message p_id ((RAFT_UPDATE, msg), p_id, serial) serial leader) msgs
+    end
+
+    fun raft_send (process, msgs) = case process.type of
+    CLIENT => map (fn (msg, sk) => send(process.id, (DIALER_CLIENT_MSG, msg, sk))) msgs
+    | CLUSTER => spawn (fn () => leader_dialer process.id msgs)
+
+    fun send_sides log sides =
+        let fun add_msg id msg sk dict = case dict of
+            [] => [(id, [(msg, sk)])]
+            | (other_id, msgs) :: t =>
+                if id = other_id then
+                    (id, (msg, sk) :: t)
+                else (other_id, msgs) :: add_msg id msg sk t
+            val (sorted_msgs, _) = case sides of
+            [] => ([], 0)
+            | x => foldl (fn ((callback, msg), (acc, seq)) =>
+                (add_msg callback msg ({ id = callback, key = (log.lastApplied, seq)}) acc, seq + 1)
+            ) ([], 1) x
+        in map (fn x => raft_send x) sorted_msgs
+    end
+
+    (* Applies all log-entries that have been committed, but not applied *)
+    fun apply_log log state_machine is_leader = 
+        if log.lastApplied < log.commitIndex then
+            let val entry = get_nth_command log (log.lastApplied + 1) 
+                val command = entry.command
+                val log = update_applied log
+            in let val (sides, status, step) = state_machine
+                    val (new_sides, new_status, new_step) = step command
+                in (if is_leader then
+                        entry.callback ();
+                        send_sides log new_sides
+                    else ());
+                apply_log log (new_sides, new_status, new_step) is_leader end
+            end
+        else (log, state_machine)
+
     fun leader_node node = 
         let val p_id = self()
             (* Appends appends all entries from a follower's nextIndex to the leader's log index*)
@@ -235,14 +384,11 @@ let
                         verbose_print (node.id^": Sending heartbeat") node.verbose;
                         leader_node node,
 
-                    (* Message has already been received and appended *)
-                    hn ((RAFT_UPDATE, x), dialer_id, serial_n) when serial_n = node.log.lastMessageSerial =>
-                        send(dialer_id, (DIALER_ACK, serial_n));
-                        loop node,
-
                     (* Message has not been appended before *)
                     hn ((RAFT_UPDATE, x), dialer_id, serial_n) => 
-                        let val (_, stat, _) = node.state_machine
+                        let val (cond, sks) = print x; apply_serialkey node.serialkeys serial_n
+                        in if cond then let
+                            val (_, stat, _) = node.state_machine
                             val node = case stat of 
                                 SUS => send(dialer_id, (DIALER_SM_BUSY, serial_n)); node
                                 | DONE => send(dialer_id, (DIALER_SM_DONE, serial_n)); node
@@ -251,7 +397,10 @@ let
                                         let fun replication_cb () = send (dialer_id, (DIALER_ACK, serial_n))
                                         in append_update node x replication_cb serial_n end
                                     else send(dialer_id, (DIALER_SM_BUSY, serial_n)); node
-                            in leader_node node end,
+                            in leader_node node end
+                        else send(dialer_id, (DIALER_ACK, serial_n));
+                            loop node
+                        end,
 
                     (* If append is successful on a follower*)
                     hn (ACKNOWLEDGE, (peer, logIndex)) => 
@@ -564,9 +713,12 @@ let
             voted_for = (),
             leader = (),
             leader_info = (),
-            state_machine = state_machine,
+            state_machine = case state_machine of
+                (_, _, _) => state_machine
+                | _ => ([], WAIT, fn x => x ()),
             snapshot_cond = snapshot_cond,
             node_amount = node_amount,
+            serialkeys = [],
             verbose = verbose
         }
         in dormant_node node
@@ -612,81 +764,6 @@ let
             add_refs nodes;
             nodes
     end
-                    
-    (* Facilitates client-side interaction to the Raft cluster *)
-    fun dialer cluster client_id = 
-        let val p_id = self()
-            fun random_leader () =
-                let fun roundUp n m = 
-                        if n <= 0 then m else roundUp (n - 1) (m + 1)
-                    val r_n = roundUp (random() * (length cluster - 1)) 0 
-                in nth cluster r_n
-            end
-
-            fun send_message msg serial_n leader = let 
-                val nonce = mkuuid()
-                val msg_timeout = start_timeout (fn() => send(p_id, (DIALER_MESSAGE_TIMEOUT, nonce)))
-                val busy_timeout = start_timeout (fn() => send(p_id, (DIALER_BUSY_TIMEOUT, nonce)))
-                fun wait () =
-                    receive [
-                    hn (NOT_LEADER, leader_id) => 
-                        send_message msg serial_n leader_id,
-                    hn (DIALER_ACK, other_serial) when other_serial = serial_n => 
-                        leader,
-                    hn (DIALER_SM_BUSY, other_serial) when other_serial = serial_n =>
-                        busy_timeout DIALER_SM_BUSY_TIMEOUT;
-                        wait (),
-                    hn (DIALER_SM_DONE, other_serial) when other_serial = serial_n =>
-                        printString "State-machine is in its DONE-state";
-                        leader,
-                    hn (DIALER_MESSAGE_TIMEOUT, x) => 
-                        if x = nonce then send_message msg serial_n (random_leader ())
-                        else wait (),
-                    hn (DIALER_BUSY_TIMEOUT, x) => 
-                        if x = nonce then send_message msg serial_n leader
-                        else wait ()
-                ]
-                in (case leader of
-                    () => msg_timeout DIALER_NOLEADER_TIMEOUT
-                    | x =>
-                        msg_timeout DIALER_NOMSG_TIMEOUT; 
-                        send(x, msg));
-                    wait ()
-            end
-
-            fun update_message x leader = let 
-                val serial_n = mkuuid()
-                in send_message ((RAFT_UPDATE, x), p_id, serial_n) serial_n leader
-            end
-
-            val leader = random_leader ()
-
-            fun loop leader prev_log prev_seq =     
-                receive [
-                    hn (RAFT_UPDATE, x) =>
-                        loop (update_message x leader) prev_log prev_seq,
-
-                    hn (DIALER_CLIENT_MSG, (msg, log_index, seq_index)) =>
-                        (if prev_log < log_index orelse (log_index = prev_log andalso seq_index > prev_seq) then
-                            send(client_id, msg);
-                            loop leader log_index seq_index
-                        else loop leader prev_log prev_seq),
-
-                    hn (SEND_TO_NTH, n, x) =>
-                        send_to_nth cluster x n;
-                        loop leader prev_log prev_seq,
-
-                    hn (SEND_TO_ALL, x) => 
-                        send_to_all cluster x (self());
-                        loop leader prev_log prev_seq,
-                    hn _ => loop leader prev_log prev_seq ]
-        in loop leader 0 0
-    end
-
-    fun dormant_dialer nodes =
-        receive [
-            hn (DIAL, pid) => dialer nodes pid
-        ]
 
     (* Spawns a distributed Raft network, which can be dialed into to
     communicate with their state-machines *)

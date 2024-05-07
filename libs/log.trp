@@ -119,25 +119,6 @@
     (* Returns a slice of all entries after the commit-index *)
     fun uncommitted_entries log = get_commands_after_nth log log.commitIndex
 
-    (* Applies all log-entries that have been committed, but not applied *)
-    fun apply_log log state_machine is_leader = 
-        if log.lastApplied < log.commitIndex then
-            let val entry = get_nth_command log (log.lastApplied + 1) 
-                val command = entry.command
-                val log = update_applied log
-            in let val (sides, status, step) = state_machine
-                    val (new_sides, new_status, new_step) = step command
-                in (if is_leader then
-                        entry.callback ();
-                        (case new_sides of
-                        [] => ()
-                        | x => mapi (fn (i, (callback, msg)) => 
-                            send (callback, (DIALER_CLIENT_MSG, (msg, log.lastApplied, i + 1)))) x)
-                    else ());
-                apply_log log (new_sides, new_status, new_step) is_leader end
-            end
-        else (log, state_machine)
-
     (* Get a snapshot of all committed entries *)
     fun get_snapshot state log = 
         if log.commitIndex > 0 andalso 
