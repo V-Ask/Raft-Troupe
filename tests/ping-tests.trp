@@ -20,19 +20,16 @@ end
   in loop new_x end
 in loop 1 end *)
 
+
 fun ping_pong_cluster_test () = 
     let val pid = self ()
         val ping_cluster = raft_spawn 5 () (fn log => log.entries_since_snap > 10) true 
         val pong_cluster = raft_spawn 5 () (fn log => log.entries_since_snap > 10) true
-        fun read_pingpong () =
-          receive [
-            hn x => print x; read_pingpong ()
-          ]
         val dialer = raft_dial ping_cluster pid
+        val dialer2 = raft_dial pong_cluster pid 
     in 
         send(dialer, (RAFT_UPDATE, (fn () => ping_server { type = CLUSTER, id = ping_cluster})));
-        send(dialer, (RAFT_UPDATE, (fn () => ping_server { type = CLUSTER, id = pong_cluster})));
-        send_delay(dialer, (RAFT_UPDATE, ({ type = CLUSTER, id = pong_cluster}, 0))) 5000;
-        read_pingpong()
+        send(dialer2, (RAFT_UPDATE, (fn () => ping_server { type = CLUSTER, id = pong_cluster})));
+        send_delay(dialer, (RAFT_UPDATE, ({ type = CLUSTER, id = pong_cluster}, 0))) 5000
 end
 (* EXPORT END*)

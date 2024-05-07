@@ -5,55 +5,25 @@ datatype Atoms = WAIT|SUS|DONE
 let (* EXPORT START *)
   fun keyval () = 
     let 
-      val store = []
 
-      fun set store (key, value) () = let 
-        val store = (key, value) :: store 
-      in ([], WAIT, main store) 
-      end
-      
-
-      and get store key () = (
-        [first (filter (fn (x,_) => x = key) store)], 
-        WAIT, 
-        main store)
-      
-
-      and main store x = case x of 
-        ("GET", key) => (
-          [], 
-          SUS, 
-          get store key
+      fun main store x = case x of 
+        ("GET", key, callback) => (
+          [(callback, first (filter (fn (x,_) => x key) store))], 
+          WAIT, 
+          main store
         )
 
         | ("SET", (key, value)) => (
           [], 
-          SUS, 
-          set store (key, value)
+          WAIT, 
+          main ((key, value) :: store)
         )
 
         | _ => ([], WAIT, main store)
 
-    in (WAIT, main store, []) 
+    in ([], WAIT, main [])
   end (* EXPORT END *)
 
-  fun test () = let
-    val (state, step, sideeffects) = keyval ()
-    val (state, step, sideeffects) = step "SET"
-    val (state, step, sideeffects) = step ("x", 1)
-    val (state, step, sideeffects) = step "SET"
-    val (state, step, sideeffects) = step ("y", 5)
-    val (state, step, sideeffects) = step "GET"
-    val (state, step, sideeffects) = step "y"
-    val _ = print sideeffects
-    val (state, step, sideeffects) = step "SET"
-    val (state, step, sideeffects) = step ("y", 3)
-    val (state, step, sideeffects) = step "GET"
-    val (state, step, sideeffects) = step "y"
-
-    val _ = print sideeffects
-  in ()
-  end
 in test ()
 end
 

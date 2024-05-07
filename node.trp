@@ -345,7 +345,7 @@ let
                     voted_for = voted_for}
 
             fun append_update node msg callback serial = 
-                let val latestLogIndex = print msg; get_log_index node.log
+                let val latestLogIndex = get_log_index node.log
                     val prevLogTerm = get_latest_log_term node.log
                     val log = append_message node.log msg callback node.term serial
                     val leader_info = update_match_index node.leader_info p_id (get_log_index log)
@@ -381,7 +381,7 @@ let
                 receive [
                     hn (SEND_HEARTBEAT, x) when nonce = x =>
                         verbose_print (node.id^": Sending heartbeat") node.verbose;
-                        leader_node node,
+                        leader_node (apply_committed node),
 
                     (* Message has not been appended before *)
                     hn ((RAFT_UPDATE, x), dialer_id, serial_n) => 
@@ -405,7 +405,7 @@ let
                     hn (ACKNOWLEDGE, (peer, logIndex)) => 
                         let val node = { node with leader_info = update_match_index node.leader_info peer logIndex }
                             val node = { node with leader_info = update_next_index node.leader_info peer (logIndex + 1) }
-                        in loop (apply_committed node) end,
+                        in loop ( node) end,
                     
                     (* If append is unsuccessful *)
                     hn (REJECT, (peer, terminfo, logIndex)) => 
