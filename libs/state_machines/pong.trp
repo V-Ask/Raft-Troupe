@@ -2,7 +2,7 @@ datatype Atoms = WAIT|SUS|DONE
 
 let (* EXPORT START *)
     fun main dialers x = case x of
-    ("pong", x) => sleep 5; (map (fn dialer => (dialer, (RAFT_UPDATE, ("ping", x)))) dialers, WAIT, main dialers)
+    ("pong", x) => sleep 20; (map (fn dialer => (dialer, (RAFT_UPDATE, ("ping", x + 1)))) dialers, WAIT, main dialers)
     | (new_dialer, "dialer") => ([], WAIT, main (new_dialer :: dialers))
     |_ => ([], WAIT, main)
 
