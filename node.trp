@@ -273,7 +273,7 @@ let
         let val p_id = self()
             val leader = random_element cluster
         in 
-            map (fn (msg, serial) => dialer_send_message p_id ((RAFT_UPDATE, msg), p_id, serial) serial leader) msgs
+            map (fn (msg, serial) => dialer_send_message p_id ((RAFT_UPDATE, msg), p_id, serial) serial leader cluster) msgs
     end
 
     fun raft_send (process, msgs) = case process.type of
@@ -301,14 +301,13 @@ let
             let val entry = get_nth_command log (log.lastApplied + 1) 
                 val command = entry.command
                 val log = update_applied log
-            in let val (sides, status, step) = state_machine
-                    val (new_sides, new_status, new_step) = step command
-                in (if is_leader then
-                        entry.callback ();
-                        send_sides log new_sides
-                    else ());
-                apply_log log (new_sides, new_status, new_step) is_leader end
-            end
+                val (sides, status, step) = state_machine
+                val (new_sides, new_status, new_step) = step command
+            in (if is_leader then
+                    entry.callback ();
+                    send_sides log new_sides
+                else ());
+            apply_log log (new_sides, new_status, new_step) is_leader end
         else (log, state_machine)
 
     fun leader_node node = 
@@ -346,7 +345,7 @@ let
                     voted_for = voted_for}
 
             fun append_update node msg callback serial = 
-                let val latestLogIndex = get_log_index node.log
+                let val latestLogIndex = print msg; get_log_index node.log
                     val prevLogTerm = get_latest_log_term node.log
                     val log = append_message node.log msg callback node.term serial
                     val leader_info = update_match_index node.leader_info p_id (get_log_index log)
@@ -386,7 +385,7 @@ let
 
                     (* Message has not been appended before *)
                     hn ((RAFT_UPDATE, x), dialer_id, serial_n) => 
-                        let val (cond, sks) = print x; apply_serialkey node.serialkeys serial_n
+                        let val (cond, sks) = apply_serialkey node.serialkeys serial_n
                         in if cond then let
                             val (_, stat, _) = node.state_machine
                             val node = case stat of 

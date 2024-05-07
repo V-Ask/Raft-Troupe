@@ -6,7 +6,7 @@ let (* EXPORT START *)
     fun main cluster x = case x of
         (callback, x) => 
             sleep 5; 
-            ([(callback, (RAFT_UPDATE, (cluster, x + 1)))], WAIT, main cluster)
+            ([(callback, (cluster, x + 1))], WAIT, main cluster)
         |_ => ([], WAIT, main cluster)
  
     fun ping_server cluster =
