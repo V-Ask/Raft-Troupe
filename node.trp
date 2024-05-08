@@ -264,11 +264,6 @@ let
         in loop leader []
     end
 
-    fun dormant_dialer nodes =
-        receive [
-            hn (DIAL, pid) => dialer nodes pid
-        ]
-
     fun leader_dialer cluster msgs = 
         let val p_id = self()
             val leader = random_element cluster
@@ -764,42 +759,35 @@ let
             nodes
     end
 
+    fun raft_dial cluster client_id =
+        spawn(fn () => dialer cluster client_id)
+
     (* Spawns a distributed Raft network, which can be dialed into to
     communicate with their state-machines *)
-    fun raft_spawn_alias aliases state_machine snapshot_cond verbose = 
+    fun raft_spawn_alias (state_machine, aliases, snapshot_cond, verbose) = 
         initiate_distributed_nodes aliases state_machine snapshot_cond verbose
+    | raft_spawn_alias (state_machine, aliases) = 
+        (state_machine, aliases, fn x => x.entries_since_snap > 50, false)
 
     (* Spawns a Raft network, which can be contacted to
     communicate with their state-machines *)
-    fun raft_spawn n state_machine snapshot_cond verbose =
+    fun raft_spawn (state_machine, n, snapshot_cond, verbose) =
         initiate_nodes n state_machine snapshot_cond verbose
+    | raft_spawn (state_machine) = raft_spawn (state_machine, 5, fn x => x.entries_since_snap > 50, false)
 
-    (* Creates a dormant dialer *)
-    fun raft_dial nodes client = 
-        let val pid = spawn(fn () => dormant_dialer nodes)
-        in 
-            send(pid, (DIAL, client));
-            pid
-    end
-
-    fun raft_dial_clusters cluster1 cluster2 =
-        let val dial1 = spawn(fn () => dormant_dialer cluster1)
-            val dial2 = spawn(fn () => dormant_dialer cluster2)
-        in
-            send(dial1, (DIAL, dial2));
-            send(dial2, (DIAL, dial1));
-            (dial1, dial2)
-    end
-
-    fun raft_d aliases state_machine snapshot_cond client_id verbose =
-        let val nodes = raft_spawn_alias aliases state_machine snapshot_cond verbose
+    fun raft_d (state_machine, client_id, aliases, snapshot_cond, verbose) =
+        let val nodes = raft_spawn_alias (state_machine, aliases, snapshot_cond, verbose)
         in (raft_dial nodes client_id, nodes)
     end
+    | raft_d (state_machine, client_id, aliases) = 
+        raft_d (state_machine, client_id, aliases, fn x => x.entries_since_snap > 50, false)
 
-    fun raft n state_machine snapshot_cond client_id verbose =
-        let val nodes = raft_spawn n state_machine snapshot_cond verbose
+    fun raft (state_machine, client_id, n, snapshot_cond, verbose) =
+        let val nodes = raft_spawn (state_machine, n, snapshot_cond, verbose)
         in (raft_dial nodes client_id, nodes)
     end
+    | raft (state_machine, client_id) = 
+        raft (state_machine, client_id, 5, fn x => x.entries_since_snap > 50, false)
 
     (* #IMPORT libs/state_machines/simple-cps.trp *)
 
@@ -808,8 +796,7 @@ let
     (* #IMPORT ./libs/state_machines/ping.trp *)
     (* #IMPORT ./libs/state_machines/pong.trp *)
 
-    (* #IMPORT ./libs/state_machines/keyval-cps.trp *)
-
+    (* #IMPORT ./libs/state_machines/fib.trp *)
     (* #IMPORT ./tests/ping-tests.trp *)
 
 

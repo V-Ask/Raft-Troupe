@@ -1,0 +1,39 @@
+datatype Atoms = WAIT|SUS|DONE
+
+let (* EXPORT START *)
+    
+    fun fib2 n callback =
+        let fun loop cb n a b = case n of
+        1 => ([(cb, b)], WAIT, fib_input)
+        | n => ([], SUS, fn () => loop cb (n - 1) b (a + b))
+
+        in if n >= 0 then case n of
+        0 => ([(callback, 0)], WAIT, fib_input)
+        | 1 => ([(callback, 1)], WAIT, fib_input)
+        | n => loop callback n 0 1
+        else ((callback, -1), WAIT, fib_input)
+    end
+
+    and fib_input x = case x of
+    (callback, n) => fib2 n callback
+    | _ => ([], WAIT, fib_input)
+
+    fun fib_main () = ([], WAIT, fib_input)
+
+(* EXPORT END *)
+    val pid = self()
+    val (sides, stat, step) = fib2 13 pid
+    val (sides, stat, step) = step()
+    val (sides, stat, step) = step()
+    val (sides, stat, step) = step()
+    val (sides, stat, step) = step()
+    val (sides, stat, step) = step()
+    val (sides, stat, step) = step()
+    val (sides, stat, step) = step()
+    val (sides, stat, step) = step()
+    val (sides, stat, step) = step()
+    val (sides, stat, step) = step()
+    val (sides, stat, step) = step()
+    val (sides, stat, step) = step()
+in print (sides, stat, step)
+end
