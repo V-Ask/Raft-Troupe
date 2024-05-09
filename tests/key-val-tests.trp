@@ -1,8 +1,30 @@
 import lists
-import troupecheck
 
 let 
     (* EXPORT START *)
+
+    fun bad_actor cluster nodes_amount stress_interval verbose = let 
+      val pid = self ()
+      val dialer = raft_dial cluster pid 
+
+      fun create_nodes nodes 0 = nodes 
+      | create_nodes nodes n = create_nodes ((n, false) :: nodes) (n - 1)
+
+      val nodes = create_nodes [] nodes_amount
+
+      fun toggle_node n = let 
+        val status = map (fn (_, s) => s) (filter (fn (node, _) => node = n) nodes) 
+        val new_nodes = (n, (not status)) :: (filter (fn (node, _) => node <> n) nodes)
+      in (
+        if status then 
+          send (dialer, (SEND_TO_NTH, n, DEBUG_CONTINUE)))
+        else
+          send (dialer, (SEND_TO_NTH, n, DEBUG_PAUSE))
+        ); new_nodes
+      end
+
+
+
 
     (* EXPORT END *)
 in 
