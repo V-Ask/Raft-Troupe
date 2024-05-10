@@ -1,4 +1,0 @@
-let fun test_print c (a, b) = print c; print a; print b
-        | test_print c = test_print c ("hello", "world")
-in test_print "a"
-end
