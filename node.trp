@@ -181,7 +181,7 @@ let
 
     fun apply_serialkey list key =
         case list of
-        [] => (true, key)
+        [] => (true, [])
         | h :: t =>
             if h = key then
                 case (h.key, key.key) of
@@ -599,7 +599,7 @@ let
                                 else if lastIncludedIndex <= log_index then false
                                 else true
 
-                            val newlog = if accepting then apply_snapshot node.state_machine_pid x node.log else node.log
+                            val newlog = if accepting then apply_snapshot x node.log else node.log
                             val reject = 
                                 fn () => send (l_id, (REJECT, (p_id, {term = node.term, leader = node.leader}, (get_log_index newlog))))
                             val ack = 
@@ -791,6 +791,7 @@ let
 
     (* #IMPORT libs/state_machines/simple-cps.trp *)
 
+    (* #IMPORT ./tests/bad_actor.trp *)
     (* #IMPORT tests/simple-cps-tests.trp *)
 
     (* #IMPORT ./libs/state_machines/ping.trp *)

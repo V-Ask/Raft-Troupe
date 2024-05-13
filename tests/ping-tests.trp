@@ -20,6 +20,37 @@ end
   in loop new_x end
 in loop 1 end *)
 
+fun ping_badactor_test () = let 
+      val pid = self ()
+      val ping_cluster = raft_spawn ((), 10, fn x => x.entries_since_snap > 50, true)
+      val pong_cluster = raft_spawn ()
+      val dialer = raft_dial ping_cluster pid
+      val dialer2 = raft_dial pong_cluster pid 
+      val _ = spawn (fn () => bad_actor ping_cluster 10 1000 true)
+  in 
+      send(dialer, (RAFT_UPDATE, (fn () => ping_server { type = CLUSTER, id = ping_cluster})));
+      send(dialer2, (RAFT_UPDATE, (fn () => ping_server { type = CLUSTER, id = pong_cluster})));
+      send_delay(dialer, (RAFT_UPDATE, ({ type = CLUSTER, id = pong_cluster}, 0))) 5000
+  end
+
+fun ping_badactor2 () = let 
+  val pid = self ()
+  val ping_cluster = raft_spawn ((), 10, fn x => x.entries_since_snap > 4, true)
+  val dialer = raft_dial ping_cluster pid
+  val _ =
+    send(dialer, (RAFT_UPDATE, (fn () => ping_server { type = CLUSTER, id = ping_cluster})));
+    spawn (fn () => bad_actor ping_cluster 10 1000 true)
+  
+  fun loop x = let
+    val _ = send (dialer, (RAFT_UPDATE, ({type=CLIENT, id=dialer}, x)))
+    val new_x = receive [hn (c, x) => x]
+  in 
+    print new_x;
+    loop new_x
+  end 
+in loop 0
+end
+
 
 fun ping_pong_cluster_test () = 
     let val pid = self ()
