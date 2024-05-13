@@ -21,8 +21,7 @@ let (* EXPORT START *)
     fun fib_main () = ([], WAIT, fib_input)
 
 (* EXPORT END *)
-    val pid = self()
-    val (sides, stat, step) = fib2 13 pid
+    val (sides, stat, step) = fib2 13
     val (sides, stat, step) = step()
     val (sides, stat, step) = step()
     val (sides, stat, step) = step()

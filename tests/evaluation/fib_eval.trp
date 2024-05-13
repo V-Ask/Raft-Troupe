@@ -1,0 +1,66 @@
+datatype Atoms = WAIT|SUS|DONE
+
+let 
+(* EXPORT START *)
+fun measure_time f = 
+    let val time_start = getTime()
+    in
+        f ();
+        (getTime() - time_start)
+    end
+
+    fun progress_cps cps = case getType cps of
+    "function" => progress_cps (cps ())
+    | x => cps
+
+    fun standard_fib n =
+        if n <= 1 then n
+        else (standard_fib (n - 1) + standard_fib (n - 2))
+
+    fun cps_fib n =
+        let fun loop n f =
+            if n <= 1 then (fn () => f n)
+            else (fn () => 
+                loop (n - 1) (fn x => fn () => 
+                    loop (n - 2) (fn y => fn () => f (x + y))))
+        in loop n (fn x => x)
+    end
+
+    fun cps_raft_fib n =
+        let fun loop cb n f =
+            if n <= 1 then ([], SUS, fn () => f n)
+            else ([], SUS, fn () => 
+                loop (n - 1) (fn x => ([], SUS, fn () => 
+                    loop (n - 2) (fn y => f (x + y)))))
+        in () end
+
+    fun fib_raft cb n =
+        let fun loop n f =
+            if n <= 1 then ([], SUS, fn () => f n)
+            else ([], SUS, fn () =>
+                loop (n - 1) (fn x => ([], SUS, fn () =>
+                    loop (n - 2) (fn y => ([], SUS, fn () => f (x + y))))))
+        in loop n (fn x => ([(cb, x)], WAIT, fib_input))
+    end
+    
+    and fib_input x = case x of 
+    (callback, n) => fib_raft callback n
+    | _ => ([], WAIT, fib_input)
+
+    fun measure_fib_raft n =
+        let val pid = self ()
+            val (dialer, cluster) = 
+                raft (([], WAIT, fib_input), pid, n, fn x => x.entries_since_snap > 50, true)
+        in send(dialer, (RAFT_UPDATE, ({type = CLIENT, id = dialer}, 10))); receive [hn x => print x]
+    end
+
+    fun measure_runtimes () =
+        let val standard_time = (measure_time (fn () => standard_fib 15))
+            val cps_time = (measure_time (fn () => progress_cps (cps_fib 15)))
+        in () 
+    end
+
+(* EXPORT END *)
+    val (sides, stat, step) = fib_input (self(), 15)
+in print (sides, stat, step)
+end
