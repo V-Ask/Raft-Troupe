@@ -401,11 +401,11 @@ let
                         let val node = { node with leader_info = update_match_index node.leader_info peer logIndex }
                             val node = { node with leader_info = update_next_index node.leader_info peer (logIndex + 1) }
                         in loop ( node) end,
-                    
+
                     (* If append is unsuccessful *)
                     hn (REJECT, (peer, terminfo, logIndex)) => 
                         if node.term >= terminfo.term then 
-                            let val node = { node with leader_info = update_next_index node.leader_info peer ((min (get_log_index node.log) (logIndex)) + 1) } 
+                            let val node = { node with leader_info = update_next_index node.leader_info peer ((min (get_log_index node.log) (logIndex)) - 1) } 
                             in loop node 
                             end
                         else follower (demote terminfo.term terminfo.leader ()
@@ -600,13 +600,14 @@ let
                                 else true
 
                             val newlog = if accepting then apply_snapshot x node.log else node.log
+                            val new_sm = if accepting then snapshot else node.state_machine
                             val reject = 
                                 fn () => send (l_id, (REJECT, (p_id, {term = node.term, leader = node.leader}, (get_log_index newlog))))
                             val ack = 
                                 fn () => send (l_id, (ACKNOWLEDGE, (p_id, get_log_index newlog)))
 
 
-                            val node = {node with term = (if node.term < leader_term then leader_term else node.term)}
+                            val node = {node with term = (if node.term < leader_term then leader_term else node.term), state_machine = new_sm}
                             
                         in 
                             (if accepting then ack ()
@@ -623,10 +624,13 @@ let
                                 if node.leader = () orelse node.term <= leader_term then l_id
                                 else node.leader}
                             val accepting = 
-                                if leader_term < node.term then false
+                              (* TODO: GEM bag verbose*)
+                              if leader_term < node.term then print "Old Leader"; false
                                 else if latestLogIndex > (get_log_index node.log) then 
+                                    print "Leader is way ahead of me";
                                     false
                                 else if (get_latest_log_term node.log) <> prevLogTerm andalso prevLogTerm > 0 then 
+                                    print "Leader has inconsistent log with me";
                                     false
                                 else true
                             val prev_commit = node.log.commitIndex

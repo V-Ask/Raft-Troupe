@@ -73,11 +73,13 @@
 
     (* Rolls the log back one entry*)
     fun rollback_log log =
-        let val (_ :: prev_log) = log.log
-    in {
+        let val loglog = log.log
+    in case loglog of
+    (_ :: prev_log) => {
         log with 
         log = prev_log
     }
+    | [] =>{log with log = []}
     end
 
     (* Get the entry of the latest log entry *)
