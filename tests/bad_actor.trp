@@ -38,7 +38,7 @@ let (*EXPORT START *)
             (if verbose then print "Toggling node" else ());
             toggle_node nodes selected
           else 
-            (if verbose then print "Tried to toggle node, but to many failures" else ());
+            (if verbose then print "Tried to toggle node, but too many failures" else ());
             nodes
       in 
         sleep stress_interval; 
@@ -46,7 +46,6 @@ let (*EXPORT START *)
       end
 
     in 
-      sleep stress_interval;
       loop nodes
     end
     (* EXPORT END *)

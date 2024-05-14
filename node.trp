@@ -265,7 +265,7 @@ let
 
     (* Spawn a state-machine on some alias *)
     fun initiate_distributed_node state_machine snapshot_cond node_amount id alias verbose = 
-        spawn(alias, (default_node id [] state_machine snapshot_cond node_amount verbose))
+        spawn(alias, fn () => (default_node id [] node_amount state_machine snapshot_cond verbose))
 
     fun initiate_distributed_nodes aliases state_machine snapshot_cond verbose =
         let val part_init = initiate_distributed_node state_machine snapshot_cond (length(aliases))
@@ -288,7 +288,7 @@ let
     fun raft_spawn_alias (state_machine, aliases, snapshot_cond, verbose) = 
         initiate_distributed_nodes aliases state_machine snapshot_cond verbose
     | raft_spawn_alias (state_machine, aliases) = 
-        (state_machine, aliases, fn x => x.entries_since_snap > 50, false)
+        raft_spawn_alias (state_machine, aliases, fn x => x.entries_since_snap > 50, false)
 
     (* Spawns a Raft network, which can be contacted to
     communicate with their state-machines *)
@@ -309,6 +309,8 @@ let
     end
     | raft (state_machine, client_id) = 
         raft (state_machine, client_id, 5, fn x => x.entries_since_snap > 50, false)
+
+    val default_aliases = ["@node1", "@node2", "@node3", "@node4", "@node5"]
 
     (* #IMPORT libs/state_machines/simple-cps.trp *)
 

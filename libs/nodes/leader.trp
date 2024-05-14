@@ -2,7 +2,7 @@
 fun leader_node node = 
     let val p_id = self()
         (* Appends appends all entries from a follower's nextIndex to the leader's log index*)
-        fun append_entries follower_pid =
+        fun append_entries node follower_pid =
                 let val nextIndex = get_next_index node.leader_info follower_pid
                 val logIndex = get_log_index node.log
             in if logIndex + 1 >= nextIndex.next then 
@@ -13,7 +13,7 @@ fun leader_node node =
                     if nextIndex.next <= node.log.snapshot.lastIncludedIndex 
                         then send(follower_pid, (SNAPSHOT, node.log.snapshot, p_id, node.term))
                     else 
-                        let val entries = get_commands_after_nth node.log latestLogIndex
+                        let val entries = get_commands_after_nth node.log.log latestLogIndex node.log.snapshot.lastIncludedIndex
                             val afterSnapshot = latestLogIndex - node.log.snapshot.lastIncludedIndex
                             val prevEntryTerm = 
                                 if afterSnapshot > 0 then (get_nth_command node.log latestLogIndex).term 
@@ -60,7 +60,8 @@ fun leader_node node =
                 val node = { node with log = snapshot_log, state_machine = new_sm}
             in 
                 case status of
-                SUS => if log_is_committed node.log then append_update node () (fn () => ()) (mkuuid()) else node
+                SUS => if log_is_committed node.log then append_update node () (fn () => ()) (mkuuid())
+                    else node
                 | _ => node
         end
             
@@ -68,9 +69,20 @@ fun leader_node node =
         
         fun loop node =
             receive [
+                (* Halts the leader *)
+                hn DEBUG_PAUSE =>
+                    let fun pause () = receive [
+                        hn (DEBUG_CONTINUE) => loop node,
+                        hn x => pause ()
+                    ]
+                    in pause () end,
+
                 hn (SEND_HEARTBEAT, x) when nonce = x =>
                     verbose_print (node.id^": Sending heartbeat") node.verbose;
                     leader_node node,
+
+                hn (SEND_HEARTBEAT, x) =>
+                    loop node,
 
                 (* Message has not been appended before *)
                 hn ((RAFT_UPDATE, x), dialer_id, serial_n) => 
@@ -92,16 +104,26 @@ fun leader_node node =
 
                 (* If append is successful on a follower*)
                 hn (ACKNOWLEDGE, (peer, logIndex)) => 
-                    let val node = { node with leader_info = update_match_index node.leader_info peer logIndex }
+                    let val prev_index = get_log_index node.log
+                        val node = { node with leader_info = update_match_index node.leader_info peer logIndex }
                         val node = { node with leader_info = update_next_index node.leader_info peer (logIndex + 1) }
                         val node = apply_committed node
-                    in loop node
+                        val next_index = get_next_index node.leader_info peer
+                    in (if prev_index < get_log_index node.log then 
+                            map (fn x => append_entries node x) 
+                                (filter (fn x => 
+                                    let val next_index = get_next_index node.leader_info x 
+                                    in x <> p_id andalso next_index.next > logIndex end) node.all_nodes)
+                        else if next_index.next <= get_log_index node.log then
+                            append_entries node peer 
+                        else ());
+                        loop node
                     end,
 
                 (* If append is unsuccessful *)
                 hn (REJECT, (peer, terminfo, logIndex)) => 
                     if node.term >= terminfo.term then 
-                        let val node = { node with leader_info = update_next_index node.leader_info peer ((min (get_log_index node.log) (logIndex)) - 1) } 
+                        let val node = { node with leader_info = update_next_index node.leader_info peer (logIndex + 1) } 
                         in loop node 
                         end
                     else follower (demote terminfo.term terminfo.leader ()
@@ -136,14 +158,6 @@ fun leader_node node =
                     print node.leader_info;
                     loop node,
 
-                (* Halts the leader *)
-                hn DEBUG_PAUSE =>
-                    let fun pause () = receive [
-                        hn (DEBUG_CONTINUE) => loop node,
-                        hn x => pause ()
-                    ]
-                    in pause () end,
-
                 (* Applies a snapshot *)
                 hn DEBUG_APPLYSNAPSHOT =>
                     let 
@@ -159,11 +173,11 @@ fun leader_node node =
                 hn DEBUG_SNAPSHOT_COND =>
                     print (evaluate_snapshot_cond node.state_machine node.snapshot_cond node.log);
                     loop node,
-                hn x => loop node
+                hn _ => loop node
             ]
     in 
         (* Append entries for each follower *)
-        map (fn x => append_entries x) (filter (fn x => x <> p_id) node.all_nodes);
+        map (fn x => append_entries node x) (filter (fn x => x <> p_id) node.all_nodes);
         start_timeout (fn () => send (p_id, (SEND_HEARTBEAT, nonce))) HEARTBEAT_INTERVAL;
         loop node
 end

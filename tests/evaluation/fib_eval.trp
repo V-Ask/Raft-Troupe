@@ -36,10 +36,10 @@ fun measure_time f =
 
     fun fib_raft cb n =
         let fun loop n f =
-            if n <= 1 then ([], SUS, fn () => f n)
+            if n <= 1 then f n
             else ([], SUS, fn () =>
                 loop (n - 1) (fn x => ([], SUS, fn () =>
-                    loop (n - 2) (fn y => ([], SUS, fn () => f (x + y))))))
+                    loop (n - 2) (fn y => f (x + y)))))
         in loop n (fn x => ([(cb, x)], WAIT, fib_input))
     end
     
@@ -47,17 +47,25 @@ fun measure_time f =
     (callback, n) => fib_raft callback n
     | _ => ([], WAIT, fib_input)
 
-    fun measure_fib_raft n =
+    fun measure_fib_raft m n stress_interval =
         let val pid = self ()
-            val (dialer, cluster) = 
-                raft (([], WAIT, fib_input), pid, n, fn x => x.entries_since_snap > 50, true)
-        in send(dialer, (RAFT_UPDATE, ({type = CLIENT, id = dialer}, 10))); receive [hn x => print x]
+            val (dialer, cluster) = raft (([], WAIT, fib_input), pid, m, fn x => x.entries_since_snap > 50, false)
+            val time_start = 
+                sleep 5000; 
+                (if stress_interval > 0 then
+                spawn (fn () => bad_actor cluster m stress_interval true)
+                else ());
+                getTime()
+        in 
+            send(dialer, (RAFT_UPDATE, ({type = CLIENT, id = dialer}, n)));
+            receive [ hn _ => () ];
+            getTime () - time_start
     end
 
-    fun measure_runtimes () =
-        let val standard_time = (measure_time (fn () => standard_fib 15))
-            val cps_time = (measure_time (fn () => progress_cps (cps_fib 15)))
-        in () 
+    fun measure_runtimes n =
+        let val standard_time = (measure_time (fn () => standard_fib n))
+            val cps_time = (measure_time (fn () => progress_cps (cps_fib n)))
+        in (standard_time, cps_time) 
     end
 
 (* EXPORT END *)
