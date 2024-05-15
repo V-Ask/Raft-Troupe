@@ -1,7 +1,7 @@
 let (*EXPORT START *)
     fun bad_actor cluster nodes_amount stress_interval verbose = let 
       val pid = self ()
-      val dialer = raft_dial cluster pid 
+      val dialer = raft_dial (cluster, pid) 
       val threshhold = nodes_amount / 2
 
       fun create_nodes nodes 0 = nodes 

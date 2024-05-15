@@ -1,38 +1,28 @@
 datatype Atoms = WAIT|SUS|DONE
 
-let (* EXPORT START *)
+(* EXPORT START *)
     
-    fun fib2 n callback =
-        let fun loop cb n a b = case n of
-        1 => ([(cb, b)], WAIT, fib_input)
-        | n => ([], SUS, fn () => loop cb (n - 1) b (a + b))
+(* Calculates the nth Fibonacci number*)
+fun fib_raft cb n =
+    (* O(2^n) recursive solution*)
+    let fun loop n f =
+        if n <= 1 then 
+            (* Pass n to function*)
+            f n
+        (* Add suspended states to ensure computation when doing recursion*)
+        else ([], SUS, fn () =>
+            loop (n - 1) (fn x => ([], SUS, fn () =>
+                loop (n - 2) (fn y => 
+                    (* Return sum of x and y to function *)
+                    f (x + y)))))
+    (* Send result of recursive loop to cb *)
+    in loop n (fn x => ([(cb, x)], WAIT, fib_input))
+end
 
-        in if n >= 0 then case n of
-        0 => ([(callback, 0)], WAIT, fib_input)
-        | 1 => ([(callback, 1)], WAIT, fib_input)
-        | n => loop callback n 0 1
-        else ((callback, -1), WAIT, fib_input)
-    end
-
-    and fib_input x = case x of
-    (callback, n) => fib2 n callback
-    | _ => ([], WAIT, fib_input)
-
-    fun fib_main () = ([], WAIT, fib_input)
+and fib_input x = case x of 
+(* Compute the nth fibonacci number if input matches *)
+(callback, n) => fib_raft callback n
+(* Ignores otherwise*)
+| _ => ([], WAIT, fib_input)
 
 (* EXPORT END *)
-    val (sides, stat, step) = fib2 13
-    val (sides, stat, step) = step()
-    val (sides, stat, step) = step()
-    val (sides, stat, step) = step()
-    val (sides, stat, step) = step()
-    val (sides, stat, step) = step()
-    val (sides, stat, step) = step()
-    val (sides, stat, step) = step()
-    val (sides, stat, step) = step()
-    val (sides, stat, step) = step()
-    val (sides, stat, step) = step()
-    val (sides, stat, step) = step()
-    val (sides, stat, step) = step()
-in print (sides, stat, step)
-end

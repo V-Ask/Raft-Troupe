@@ -1,6 +1,7 @@
-import lists
-
-let val test = [1, 2, 3, 4, 5]
-    val slice = slice 5 5 (reverse test)
-in slice
+let fun some_sm cluster callback =
+        ([(callback, cluster)], WAIT, some_sm cluster)
+    val cluster = raft_spawn ()
+    val pid = self ()
+    val dialer = raft_dial (cluster, pid)
+in send(dialer, (RAFT_UPDATE, some_sm cluster))
 end

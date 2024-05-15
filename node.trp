@@ -280,7 +280,7 @@ let
             nodes
     end
 
-    fun raft_dial cluster client_id =
+    fun raft_dial (cluster, client_id) =
         spawn(fn () => dialer cluster client_id)
 
     (* Spawns a distributed Raft network, which can be dialed into to
@@ -288,27 +288,27 @@ let
     fun raft_spawn_alias (state_machine, aliases, snapshot_cond, verbose) = 
         initiate_distributed_nodes aliases state_machine snapshot_cond verbose
     | raft_spawn_alias (state_machine, aliases) = 
-        raft_spawn_alias (state_machine, aliases, fn x => x.entries_since_snap > 50, false)
+        raft_spawn_alias (state_machine, aliases, 50, false)
 
     (* Spawns a Raft network, which can be contacted to
     communicate with their state-machines *)
     fun raft_spawn (state_machine, n, snapshot_cond, verbose) =
         initiate_nodes n state_machine snapshot_cond verbose
-    | raft_spawn (state_machine) = raft_spawn (state_machine, 5, fn x => x.entries_since_snap > 50, false)
+    | raft_spawn (state_machine) = raft_spawn (state_machine, 5, 50, false)
 
     fun raft_d (state_machine, client_id, aliases, snapshot_cond, verbose) =
         let val nodes = raft_spawn_alias (state_machine, aliases, snapshot_cond, verbose)
-        in (raft_dial nodes client_id, nodes)
+        in (raft_dial (nodes, client_id), nodes)
     end
     | raft_d (state_machine, client_id, aliases) = 
-        raft_d (state_machine, client_id, aliases, fn x => x.entries_since_snap > 50, false)
+        raft_d (state_machine, client_id, aliases, 50, false)
 
     fun raft (state_machine, client_id, n, snapshot_cond, verbose) =
         let val nodes = raft_spawn (state_machine, n, snapshot_cond, verbose)
-        in (raft_dial nodes client_id, nodes)
+        in (raft_dial (nodes, client_id), nodes)
     end
     | raft (state_machine, client_id) = 
-        raft (state_machine, client_id, 5, fn x => x.entries_since_snap > 50, false)
+        raft (state_machine, client_id, 5, 50, false)
 
     val default_aliases = ["@node1", "@node2", "@node3", "@node4", "@node5"]
 
@@ -317,8 +317,7 @@ let
     (* #IMPORT ./tests/bad_actor.trp *)
     (* #IMPORT tests/simple-cps-tests.trp *)
 
-    (* #IMPORT ./libs/state_machines/ping.trp *)
-    (* #IMPORT ./libs/state_machines/pong.trp *)
+    (* #IMPORT ./libs/state_machines/fib.trp *)
 
     (* #IMPORT ./tests/evaluation/fib_eval.trp *)
 

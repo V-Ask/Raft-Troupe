@@ -143,19 +143,9 @@
                 snapshot = snapshot }
     end
 
-    (* Generates a summary of the log containing the amount of committed
-    entries, and the number of entries since the last Snapshot *)
-    fun generate_summary log = 
-        {applied_log_size = log.lastApplied, 
-            entries_since_snap = (log.lastApplied - log.snapshot.lastIncludedIndex)}
-
     (* Asks the state-machine whether or not to snapshot *)
     fun evaluate_snapshot_cond state snapshot_cond log =
-        let val p_id = self ()
-            val summary = generate_summary log
-        in 
-            if snapshot_cond summary then
-                apply_snapshot (get_snapshot state log) log
-            else log
-        end
+        if (log.lastApplied - log.snapshot.lastIncludedIndex) > snapshot_cond then
+            apply_snapshot (get_snapshot state log) log
+        else log
     (* EXPORT END *)

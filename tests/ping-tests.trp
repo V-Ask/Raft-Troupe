@@ -12,7 +12,7 @@ end
 
 (* fun ping_test2 () = let 
   val pid = self ()
-  val raft = raft 5 (ping_server ()) (fn log => log.entries_since_snap > 10) pid false 
+  val raft = raft 5 (ping_server ()) 10 pid false 
   fun loop x = let 
     val _ = sleep 500
     val _ = printString "ping"; send (raft, (RAFT_UPDATE, (pid, ("ping", x))))
@@ -22,10 +22,10 @@ in loop 1 end *)
 
 fun ping_badactor_test () = let 
       val pid = self ()
-      val ping_cluster = raft_spawn ((), 10, fn x => x.entries_since_snap > 50, true)
+      val ping_cluster = raft_spawn ((), 10, 50, true)
       val pong_cluster = raft_spawn ()
-      val dialer = raft_dial ping_cluster pid
-      val dialer2 = raft_dial pong_cluster pid 
+      val dialer = raft_dial (ping_cluster, pid)
+      val dialer2 = raft_dial (pong_cluster, pid) 
       val _ = spawn (fn () => bad_actor ping_cluster 10 1000 true)
   in 
       send(dialer, (RAFT_UPDATE, (fn () => ping_server { type = CLUSTER, id = ping_cluster})));
@@ -35,8 +35,8 @@ fun ping_badactor_test () = let
 
 fun ping_badactor2 () = let 
   val pid = self ()
-  val ping_cluster = raft_spawn ((), 11, fn x => x.entries_since_snap > 2, true)
-  val dialer = raft_dial ping_cluster pid
+  val ping_cluster = raft_spawn ((), 11, 2, true)
+  val dialer = raft_dial (ping_cluster, pid)
   val _ =
     send(dialer, (RAFT_UPDATE, (fn () => ping_server { type = CLUSTER, id = ping_cluster})));
     spawn (fn () => bad_actor ping_cluster 10 1000 true)
@@ -56,8 +56,8 @@ fun ping_pong_cluster_test () =
     let val pid = self ()
         val ping_cluster = raft_spawn () 
         val pong_cluster = raft_spawn ()
-        val dialer = raft_dial ping_cluster pid
-        val dialer2 = raft_dial pong_cluster pid 
+        val dialer = raft_dial (ping_cluster, pid)
+        val dialer2 = raft_dial (pong_cluster, pid) 
     in 
         send(dialer, (RAFT_UPDATE, (fn () => ping_server { type = CLUSTER, id = ping_cluster})));
         send(dialer2, (RAFT_UPDATE, (fn () => ping_server { type = CLUSTER, id = pong_cluster})));

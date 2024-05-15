@@ -26,30 +26,10 @@ fun measure_time f =
         in loop n (fn x => x)
     end
 
-    fun cps_raft_fib n =
-        let fun loop cb n f =
-            if n <= 1 then ([], SUS, fn () => f n)
-            else ([], SUS, fn () => 
-                loop (n - 1) (fn x => ([], SUS, fn () => 
-                    loop (n - 2) (fn y => f (x + y)))))
-        in () end
-
-    fun fib_raft cb n =
-        let fun loop n f =
-            if n <= 1 then f n
-            else ([], SUS, fn () =>
-                loop (n - 1) (fn x => ([], SUS, fn () =>
-                    loop (n - 2) (fn y => f (x + y)))))
-        in loop n (fn x => ([(cb, x)], WAIT, fib_input))
-    end
-    
-    and fib_input x = case x of 
-    (callback, n) => fib_raft callback n
-    | _ => ([], WAIT, fib_input)
-
     fun measure_fib_raft m n stress_interval =
         let val pid = self ()
-            val (dialer, cluster) = raft (([], WAIT, fib_input), pid, m, fn x => x.entries_since_snap > 50, false)
+            val cluster = raft_spawn ([], WAIT, fib_input)
+            val dialer = raft_dial (cluster, pid)
             val time_start = 
                 sleep 5000; 
                 (if stress_interval > 0 then

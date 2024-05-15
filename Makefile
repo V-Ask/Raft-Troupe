@@ -26,6 +26,9 @@ zero.listener5:
 raft.dialer: build/node_dest.trp
 	$(START) ./build/node_dest.trp --id=ids/raft-dialer.json --aliases=aliases.json # --debug --debugp2p
 
+test.dialer: 
+	$(START) test.trp --id=ids/raft-dialer.json --aliases=aliases.json # --debug --debugp2p
+
 
 create-network-identifiers:
 	mkdir -p ids 
