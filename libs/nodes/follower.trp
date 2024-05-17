@@ -34,11 +34,11 @@ and follower node =
                             follower node
                         fun yes_vote () =
                             verbose_print (node.id^": Voting yes") node.verbose;
-                            follower (vote_for c_id c_term node)
+                            follower (vote_for c_id c_term ({node with term = c_term}))
                     in 
-                        if latestLogIndex > c_log_index then no_vote ()
-                        else if latestLogTerm > c_log_term then no_vote ()
-                        else if c_term <= node.term then no_vote ()
+                        if latestLogIndex > c_log_index
+                        orelse latestLogTerm <> c_log_term
+                        orelse c_term <= node.term then no_vote ()
                         else yes_vote ()
                     end,
 

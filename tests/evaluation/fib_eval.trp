@@ -19,10 +19,10 @@ fun measure_time f =
 
     fun cps_fib n =
         let fun loop n f =
-            if n <= 1 then (fn () => f n)
+            if n <= 1 then f n
             else (fn () => 
                 loop (n - 1) (fn x => fn () => 
-                    loop (n - 2) (fn y => fn () => f (x + y))))
+                    loop (n - 2) (fn y => f (x + y))))
         in loop n (fn x => x)
     end
 
@@ -30,7 +30,7 @@ fun measure_time f =
         let val pid = self ()
             val cluster = raft_spawn ([], WAIT, fib_input)
             val dialer = raft_dial (cluster, pid)
-            val time_start = 
+            val time_start =
                 sleep 5000; 
                 (if stress_interval > 0 then
                 spawn (fn () => bad_actor cluster m stress_interval true)
