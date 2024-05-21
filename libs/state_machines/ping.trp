@@ -1,62 +1,17 @@
 import lists
+datatype Atoms = WAIT|SUS|DONE
 
-let 
-  (* EXPORT START *)
+let (* EXPORT START *)
 
-  fun ping start = let 
-
-    fun main_loop counter changes = receive [
-      hn ("PING", call) => 
-        send (call, "pong"); 
-        main_loop (counter + 1) ("INCREMENT" :: changes),
-
-      hn ("GET", call) =>
-        send (call, counter);
-        main_loop counter changes,
-
-      hn ("INCREMENT") =>
-        main_loop (counter + 1) changes,
-
-      hn ("SNAP_COND", (summary, call)) => 
-        send (call, (
-          "SNAPSHOT_CALLBACK",
-          summary.entries_since_snap > 20
-        ));
-        main_loop counter changes,
-
-      hn ("GET_SNAP", call) =>
-        send (call, ("STATE_CALLBACK", counter));
-        main_loop counter changes,
-
-      hn ("GET_CHANGES", call) =>
-        send (call, ("CHANGES_CALLBACK", changes));
-        main_loop counter [],
-
-      hn _ => main_loop counter changes
-    ]
-  in main_loop start [] 
-  end
-
-  val ping_hooks = {
-    sethook = (fn _ => ()),
-    gethook = (fn (type, call) => case type of "ping" => ("PING",call) | _ => ("GET", call)),
-    snapshot_condition_hook = (fn (log_summary, call) => ("SNAP_COND", (log_summary, call))),
-    get_snapshot_hook = (fn callback => ("GET_SNAP", callback)),
-    get_changes_hook = (fn callback => ("GET_CHANGES", callback))
-  }
+    fun main cluster x = case x of
+        (callback, x) => 
+            sleep 5;
+            ([(callback, (cluster, x + 1))], WAIT, main cluster)
+        |_ => ([], WAIT, main cluster)
+ 
+    fun ping_server cluster =
+        ([], WAIT, main cluster)
 
   (* EXPORT END *)
-  fun test_ping () = let 
-    val pid = self ()
-    val ping_server = spawn (fn () => ping 0)
-  in 
-    print "Starting test";
-    send (ping_server, ("PING", pid));
-    print (receive [hn x => x]);
-    send (ping_server, ("PING", pid));
-    print (receive [hn x => x]);
-    send (ping_server, ("GET", pid));
-    print (receive [hn x => x])
-    end
-in test_ping () 
+in ()
 end

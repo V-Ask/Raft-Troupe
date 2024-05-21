@@ -2,6 +2,7 @@ import lists
 let (* EXPORT START *)
     fun is_even i = i mod 2 = 0
 
+    (* Using QuickSelect, finds the kth element of a list. *)
     fun quickselect list k = 
         case list of
         [] => "ERROR: Empty list"
@@ -14,6 +15,7 @@ let (* EXPORT START *)
                 else h
             end
 
+    (* Returns the median of a list. *)
     fun median list = 
         let val len = length list
             val middle = if is_even len then len / 2 - 1 else (len - 1) / 2
