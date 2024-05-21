@@ -105,12 +105,8 @@ let
     val LOCAL_ERROR_TIMEOUT = 4000
     val ELECTION_TIMEOUT_LOWER = 2000
     val ELECTION_TIMEOUT_UPPER = 4000
-<<<<<<< HEAD
-    val HEARTBEAT_INTERVAL = 700
-=======
     val HEARTBEAT_INTERVAL = 500
 
->>>>>>> 0c31359 (Maybe a bit slow, but we have something that works)
     val DIALER_NOLEADER_TIMEOUT = 500
     val DIALER_NOMSG_TIMEOUT = 2000
     val DIALER_SM_BUSY_TIMEOUT = 1000
