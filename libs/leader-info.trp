@@ -19,6 +19,8 @@ let
     (* Get the matchIndex of a peer *)
     fun get_match_index leader_info peer = first (filter (fn (x) => x.peer = peer) leader_info.matchIndex)
 
+    (* Updates a cluster member's next-index. This is done after an
+    acknowledgement or rejection. *)
     fun update_next_index leader_info peer new = let
         val prevIndex = get_next_index leader_info peer
         val newIndex = {peer = peer, next = new}
@@ -28,13 +30,15 @@ let
         nextIndex = newIndex :: withoutPeer
     } end
 
+    (* Updates a cluster member's match-index, denoting how much of their log
+    matches the leader holding the leader info. *)
     fun update_match_index leader_info peer new = let
         val prevIndex = get_match_index leader_info peer
         val newIndex = {peer = peer, match = new}
-        val witoutPeer = filter (fn (x) => x.peer <> peer) leader_info.matchIndex
+        val withoutPeer = filter (fn (x) => x.peer <> peer) leader_info.matchIndex
     in {
         leader_info with 
-        matchIndex = newIndex :: witoutPeer
+        matchIndex = newIndex :: withoutPeer
     } end
 
     (* Get all follower's matchIndex*)

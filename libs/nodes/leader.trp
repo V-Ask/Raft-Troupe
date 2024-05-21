@@ -22,7 +22,7 @@ fun leader_node node =
                     end
             end
             (* A follower should never get more entries than the leader *)
-            else print "ERROR"
+            else ()
         end
 
         (* Convert leader to follower *)
@@ -155,7 +155,6 @@ fun leader_node node =
                 (* Prints log *)
                 hn DEBUG_PRINTLOG =>
                     pretty_print_log node.id node.log;
-                    print node.leader_info;
                     loop node,
 
                 (* Applies a snapshot *)
@@ -168,11 +167,6 @@ fun leader_node node =
                     in 
                         verbose_print (node.id^": applying snapshot") node.verbose;
                         loop node end,
-
-                (* Asks the state-machine for the snapshot condition *)
-                hn DEBUG_SNAPSHOT_COND =>
-                    print (evaluate_snapshot_cond node.state_machine node.snapshot_cond node.log);
-                    loop node,
                 hn _ => loop node
             ]
     in 

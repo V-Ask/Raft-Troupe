@@ -10,7 +10,7 @@ let (* EXPORT START *)
             ([fn () => print "Suspended...:"], SUS, fn () =>
                 ([fn () => print "Give input:"], WAIT, fn x =>
                     ([fn () => print x], SUS, fn () =>
-                        ([fn () => print "DONE"], DONE, ())))))
+                        ([fn () => print DONE], DONE, ())))))
 
     fun infinite_cps () = 
         (SUS, infinite_cps, [])

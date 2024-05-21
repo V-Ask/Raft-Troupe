@@ -124,15 +124,19 @@ let
 
     fun min a b = if a > b then b else a
 
+    (* Prints if verbose is true. *)
+    fun verbose_print x verbose = 
+        (* Disabled for library *)
+        (* if verbose then print x else *) 
+        ()
+
     (* #IMPORT libs/quickselect.trp *)
 
     (* #IMPORT libs/log.trp *)
 
     (* #IMPORT libs/leader-info.trp *)
 
-    fun verbose_print x verbose = if verbose then print x else ()
-
-    (* Executes a function after a given timeout *)
+    (* Executes a function after a given timeout. *)
     fun start_timeout func duration = 
         let fun timeout () = 
             let val time = duration
@@ -143,60 +147,47 @@ let
         in spawn timeout
     end
 
-        fun send_delay (to, m) delay =
+    (* Send message after a delay. *)
+    fun send_delay (to, m) delay =
         sleep delay;
         send (to, m)
-
-    fun err_timeout func default = 
-        let val p_id = self()
-            val nonce = mkuuid()
-        in 
-            start_timeout (fn () => send(p_id, (ERROR_TIMEOUT, nonce))) LOCAL_ERROR_TIMEOUT;
-            spawn (fn () => 
-                let val x = func ()
-                in send(p_id, (FUNCTION_DONE, nonce, x)) end);
-            receive [
-                hn (ERROR_TIMEOUT, x) when x = nonce => 
-                    printString "==========================";
-                    printString "Timeout-Error on func:";
-                    print func;
-                    printString "Trying to recover, but there may be an error here";
-                    printString "==========================";
-                    (* TODO: THIS IS WHERE A THREAD MUST BE KILLED *)
-                    default,
-                hn (FUNCTION_DONE, x, output) when x = nonce =>
-                    output
-            ]
-    end
 
     (* Starts a random timeout with lower=2sec and upper=4sec *)
     fun start_random_timeout func = start_timeout func (ELECTION_TIMEOUT_LOWER + ((random ()) * (ELECTION_TIMEOUT_UPPER - ELECTION_TIMEOUT_LOWER)))
 
     (* #IMPORT ./libs/dialer.trp *)
 
+    (* Send the side-effect-messages to dialers or clusters *)
     fun send_sides log sides =
+        (* Add message to key-value-store, sorting by the recipients. *)
         let fun add_msg id msg sk dict = case dict of
             [] => [(id, [(msg, sk)])]
             | (other_id, msgs) :: t =>
                 if id = other_id then
                     (id, (msg, sk) :: t)
                 else (other_id, msgs) :: add_msg id msg sk t
+            (* Generate key-value-store of all message, sorting by recipients. *)
             val (sorted_msgs, _) = case sides of
             [] => ([], 0)
             | x => foldl (fn ((callback, msg), (acc, seq)) =>
                 (add_msg callback msg ({ id = callback, key = (log.lastApplied, seq)}) acc, seq + 1)
             ) ([], 1) x
+        (* Sends all messages. *)
         in map (fn x => raft_send x) sorted_msgs
     end
 
     (* Applies all log-entries that have been committed, but not applied *)
     fun apply_log log state_machine is_leader = 
+        (* If any non-applied, committed logs apply... *)
         if log.lastApplied < log.commitIndex then
+            (* Get the latest non-applied committed entry *)
             let val entry = get_nth_command log (log.lastApplied + 1) 
                 val command = entry.command
+                (* Update log to apply entry and apply entry on state-machine*)
                 val log = update_applied log
                 val (sides, status, step) = state_machine
                 val (new_sides, new_status, new_step) = step command
+            (* If leader is applying, execute side-effects. *)
             in (if is_leader then
                     entry.callback ();
                     send_sides log new_sides
@@ -208,6 +199,7 @@ let
     (* #IMPORT ./libs/nodes/candidate.trp *)
     (* #IMPORT ./libs/nodes/follower.trp *)
 
+    (* A node is dormant until it has received the references of all other nodes. *)
     fun dormant_node node =
         if length(node.all_nodes) < node.node_amount then
             receive [
@@ -280,6 +272,7 @@ let
             nodes
     end
 
+    (* Spawns a dialer, dialing into a cluster. *)
     fun raft_dial (cluster, client_id) =
         spawn(fn () => dialer cluster client_id)
 
@@ -296,7 +289,7 @@ let
         initiate_nodes n state_machine snapshot_cond verbose
     | raft_spawn (state_machine) = raft_spawn (state_machine, 5, 50, false)
 
-    fun raft_d (state_machine, client_id, aliases, snapshot_cond, verbose) =
+    (*fun raft_d (state_machine, client_id, aliases, snapshot_cond, verbose) =
         let val nodes = raft_spawn_alias (state_machine, aliases, snapshot_cond, verbose)
         in (raft_dial (nodes, client_id), nodes)
     end
@@ -310,21 +303,17 @@ let
     | raft (state_machine, client_id) = 
         raft (state_machine, client_id, 5, 50, false)
 
-    val default_aliases = ["@node1", "@node2", "@node3", "@node4", "@node5"]
+    val default_aliases = ["@node1", "@node2", "@node3", "@node4", "@node5"]*)
 
-    (* #IMPORT libs/state_machines/simple-cps.trp *)
-
-    (* #IMPORT ./tests/bad_actor.trp *)
-    (* #IMPORT tests/simple-cps-tests.trp *)
-    (* #IMPORT ./libs/state_machines/ping.trp *)
-    (* #IMPORT ./tests/ping-tests.trp*)
-
-    (* #IMPORT ./libs/state_machines/fib.trp *)
-
-    (* #IMPORT ./tests/evaluation/fib_eval.trp *)
-
-
-    val default_aliases = ["@node1", "@node2", "@node3"]
-
-in ()
+in
+    [ ("raft_dial", raft_dial)
+    , ("raft_spawn_alias", raft_spawn_alias)
+    , ("raft_spawn", raft_spawn)
+    , ("WAIT", WAIT)
+    , ("SUS", SUS)
+    , ("DONE", DONE)
+    , ("RAFT_UPDATE", RAFT_UPDATE)
+    , ("CLIENT", CLIENT)
+    , ("CLUSTER", CLUSTER)
+    ]
 end

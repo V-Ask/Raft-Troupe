@@ -1,15 +1,19 @@
     (* EXPORT START *)
-    (* Creates a snapshot *)
+    (* Creates a snapshot. *)
     fun set_snapshot snapshot index term = {
         snapshot = snapshot,
         lastIncludedIndex = index,
         lastIncludedTerm = term
     }
 
-    (* Creates a default, empty snapshot *)
-    val empty_snapshot = set_snapshot () 0 0
+    (* Creates a default, empty snapshot. *)
+    val empty_snapshot = {
+        snapshot = (),
+        lastIncludedIndex = 0,
+        lastIncludedTerm = 0
+    }
 
-    (* A default, empty log*)
+    (* A default, empty log. *)
     val empty_log = {
         log = [],
         snapshot = empty_snapshot,
@@ -19,7 +23,8 @@
     }
 
     fun pretty_print_log id log = 
-        printString "\n========******========";
+        (* Disabled for library *)
+        (* printString "\n========******========";
         print (length log.log);
         printString ("ID: "^id);
         printString "----------------------";
@@ -33,9 +38,10 @@
         printString "----------------------";
         printString "Snapshot:";
         print log.snapshot;
-        printString "========******========\n"
+        printString "========******========\n";*)
+        ()
 
-    (* Appends a message to the log, and notes the message's serial number *)
+    (* Appends a message to the log, and notes the message's serial number. *)
     fun append_message log message callback term serial = 
         let val new_entry = {
             term = term,
@@ -51,7 +57,7 @@
     end
 
 
-    (* Appends a list of message to the log *)
+    (* Appends a list of message to the log. *)
     fun add_entries_to_log log entries term =
         case entries of
         [] => log
@@ -59,19 +65,19 @@
             add_entries_to_log (append_message log h.command h.callback term h.serial) t
             h.term
 
-    (* Updates the lastApplied-index*)
+    (* Updates the lastApplied-index. *)
     fun update_applied log = {
         log with
         lastApplied = log.lastApplied + 1
     }
     
-    (* Commits a message in the log *)
+    (* Commits a message in the log. *)
     fun update_commit log new_index = {
        log with 
        commitIndex = (max new_index log.commitIndex)
     }
 
-    (* Rolls the log back one entry*)
+    (* Rolls the log back one entry. *)
     fun rollback_log log =
         let val loglog = log.log
     in case loglog of
@@ -82,13 +88,13 @@
     | [] => {log with log = []}
     end
 
-    (* Get the entry of the latest log entry *)
+    (* Get the entry of the latest log entry. *)
     fun get_log_index log = (length log.log) + log.snapshot.lastIncludedIndex
 
-    (*Determines whether or not all log changes have been committed*)
+    (*Determines whether or not all log changes have been committed. *)
     fun log_is_committed log = (get_log_index log = log.commitIndex)
 
-    (* Rolls the log back n time *)
+    (* Rolls the log back n time. *)
     fun rollback_log_to log n = 
         if n < (get_log_index log) then
             let val log = rollback_log log
@@ -97,28 +103,30 @@
         else log
 
     (* Get the term of the latest entry of the log, or, if empty, the last
-    included index of the snapshot*)
+    included index of the snapshot. *)
     fun get_latest_entry_term log =
         case log.log of
         [] => log.snapshot.lastIncludedTerm
         | h :: _ => h.term
 
+    (* Get the term of the latest log entry. *)
     fun get_latest_log_term log = get_latest_entry_term log
 
+    (* Get the message of the latest log entry. *)
     fun get_latest_log_command log = 
         case log.log of
-        [] => 0 (* Should not be reachable*)
+        [] => 0 (* Should not be reachable. *)
         | h :: _ => h.command
 
     fun get_nth_command log index = nth (reverse log.log) (index - log.snapshot.lastIncludedIndex) 
 
-    (* Returns a slice of all entries after log-index n *)
+    (* Returns a slice of all entries after log-index n. *)
     fun get_commands_after_nth entries n last_included =
         let val log_slice = slice (n - last_included) (length entries) (reverse entries)
         in log_slice
         end
 
-    (* Get a snapshot of all committed entries *)
+    (* Get a snapshot of all committed entries. *)
     fun get_snapshot state log = 
         if log.commitIndex > 0 andalso 
         (log.commitIndex - log.snapshot.lastIncludedIndex) <= length log.log then
@@ -127,7 +135,7 @@
         else empty_snapshot
         
 
-    (* Applies a snapshot to the log *)
+    (* Applies a snapshot to the log. *)
     fun apply_snapshot snapshot log =
         let val newCommitIndex = 
                 if log.commitIndex < snapshot.lastIncludedIndex then snapshot.lastIncludedIndex
@@ -143,7 +151,7 @@
                 snapshot = snapshot }
     end
 
-    (* Asks the state-machine whether or not to snapshot *)
+    (* Asks the state-machine whether or not to snapshot. *)
     fun evaluate_snapshot_cond state snapshot_cond log =
         if (log.lastApplied - log.snapshot.lastIncludedIndex) > snapshot_cond then
             apply_snapshot (get_snapshot state log) log
