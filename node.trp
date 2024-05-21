@@ -187,12 +187,8 @@ let
             fun loop node =
                 receive [
                     hn ("SEND_HEARTBEAT", x) when nonce = x =>
-                        let val log = 
-                            verbose_print (node.id^": Sending heartbeat") node.verbose;
-                            err_timeout (fn () => add_internal_changes state_machine_pid node.hooks node.term node.log) node.log 
-                        in 
-                            
-                            leader_node ({node with log = log}) state_machine_pid end,
+                        verbose_print (node.id^": Sending heartbeat") node.verbose;
+                        leader_node node state_machine_pid,
 
                     (* Message has already been received and appended *)
                     hn (("RAFT-UPDATE", x), dialer_id, serial_n) when serial_n = node.log.lastMessageSerial =>
@@ -662,20 +658,7 @@ let
 
     (* #IMPORT libs/state_machines/key-val.trp *)
 
-    (* #IMPORT libs/state_machines/counter.trp *)
-
-    (* #IMPORT libs/state_machines/epoch_counter.trp *)
-
-    (* #IMPORT libs/state_machines/ping.trp *)
-
-
     (* #IMPORT libs/tests/key-val-tests.trp *)
-
-    (* #IMPORT libs/tests/counter-tests.trp *)
-
-    (* #IMPORT libs/tests/epoch-counter-tests.trp *)
-
-    (* #IMPORT libs/tests/ping-tests.trp *)
 
     val default_aliases = ["@node1", "@node2", "@node3"]
 
