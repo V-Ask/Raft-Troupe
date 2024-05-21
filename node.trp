@@ -1,6 +1,4 @@
 import lists
-import stdio
-
 
 (*
     Log = {
@@ -9,7 +7,7 @@ import stdio
         lastApplied: int,
         internalChanges: int,
         commitIndex: int,
-        lastMessageSerial: string
+        latestSerials: SerialKey[]
     }
     Snapshot = {
         snapshot: Some state
@@ -20,6 +18,10 @@ import stdio
         term: int,
         command: message,
         serial: string
+    }
+    SerialKey = {
+        id: clusterId[] | pid,
+        key: (logIndex, number) | nonce
     }
 *)
 
@@ -48,7 +50,6 @@ import stdio
         log_size: int,
         entries_since_snap: int
     }
-
 *)
 
 (*
@@ -60,23 +61,55 @@ import stdio
         voted_for: string,
         leader: string,
         leader_info: LeaderInfo,
-        state_machine: fn state => state_machine(state)
-        empty_state: State,
-        hooks: StateMachine,
+        snapshot_condition: fn logSummary => ... : boolean
+        state_machine: ([SIDE-EFFECTS], STATUS, STEP-FUNC)
         total_nodes: int,
         verbose: boolean
     }
 *)
 
+(*
+    RaftProcesses = {
+        type: Client | Cluster,
+        id: pid | Clusterid[]
+    }
+*)
+
+datatype Atoms = 
+                WAIT | SUS | DONE
+                | SEND_HEARTBEAT 
+                | RAFT_UPDATE 
+                | NOT_LEADER
+                | ACKNOWLEDGE
+                | REJECT
+                | ELECTION_TIMEOUT
+                | REQUEST_VOTE | YES_VOTE | NO_VOTE | VOTE_TIMEOUT
+                | APPEND_ENTRIES | SNAPSHOT
+                | ADD_NODES
+                | DIAL
+
+                | DIALER_ACK | DIALER_SM_BUSY | DIALER_SM_DONE | DIALER_CLIENT_MSG
+                | DIALER_MESSAGE_TIMEOUT | DIALER_BUSY_TIMEOUT 
+
+                | SEND_TO_NTH | SEND_TO_ALL
+
+                | DEBUG_PRINTLOG | DEBUG_PAUSE | DEBUG_CONTINUE | DEBUG_APPLYSNAPSHOT | DEBUG_SNAPSHOT_COND | DEBUG_TIMEOUT
+
+                | FUNCTION_DONE
+
+                | ERROR_TIMEOUT
+                | CLUSTER | CLIENT
 
 let 
     (* Constants *)
     val LOCAL_ERROR_TIMEOUT = 4000
     val ELECTION_TIMEOUT_LOWER = 2000
     val ELECTION_TIMEOUT_UPPER = 4000
-    val HEARTBEAT_INTERVAL = 700
+    val HEARTBEAT_INTERVAL = 500
+
     val DIALER_NOLEADER_TIMEOUT = 500
     val DIALER_NOMSG_TIMEOUT = 2000
+    val DIALER_SM_BUSY_TIMEOUT = 1000
 
     fun not a = a = false
     fun send_to_all processes msg sender = map (fn x => send(x, msg)) (filter (fn x => x <> sender) processes)
@@ -87,16 +120,19 @@ let
 
     fun min a b = if a > b then b else a
 
+    (* Prints if verbose is true. *)
+    fun verbose_print x verbose = 
+        (* Disabled for library *)
+        (* if verbose then print x else *) 
+        ()
+
     (* #IMPORT libs/quickselect.trp *)
 
     (* #IMPORT libs/log.trp *)
 
-
     (* #IMPORT libs/leader-info.trp *)
 
-    fun verbose_print x verbose = if verbose then print x else ()
-
-    (* Executes a function after a given timeout *)
+    (* Executes a function after a given timeout. *)
     fun start_timeout func duration = 
         let fun timeout () = 
             let val time = duration
@@ -107,426 +143,71 @@ let
         in spawn timeout
     end
 
-    fun err_timeout func default = 
-        let val p_id = self()
-            val nonce = mkuuid()
-        in 
-            start_timeout (fn () => send(p_id, ("ERROR_TIMEOUT", nonce))) LOCAL_ERROR_TIMEOUT;
-            spawn (fn () => 
-                let val x = func ()
-                in send(p_id, ("FUNCTION_DONE", nonce, x)) end);
-            receive [
-                hn ("ERROR_TIMEOUT", x) when x = nonce => 
-                    printString "==========================";
-                    printString "Timeout-Error on func:";
-                    print func;
-                    printString "Trying to recover, but there may be an error here";
-                    printString "==========================";
-                    (* TODO: THIS IS WHERE A THREAD MUST BE KILLED *)
-                    default,
-                hn ("FUNCTION_DONE", x, output) when x = nonce =>
-                    output
-            ]
-    end
+    (* Send message after a delay. *)
+    fun send_delay (to, m) delay =
+        sleep delay;
+        send (to, m)
 
     (* Starts a random timeout with lower=2sec and upper=4sec *)
     fun start_random_timeout func = start_timeout func (ELECTION_TIMEOUT_LOWER + ((random ()) * (ELECTION_TIMEOUT_UPPER - ELECTION_TIMEOUT_LOWER)))
-    
-    fun leader_node node state_machine_pid = 
-        let val p_id = self()
-            (* Appends appends all entries from a follower's nextIndex to the leader's log index*)
-            fun append_entries follower_pid =
-                    let val nextIndex = get_next_index node.leader_info follower_pid
-                    val logIndex = get_log_index node.log
-                in if logIndex + 1 >= nextIndex.next then 
-                    let 
-                        val latestLogIndex = nextIndex.next - 1
-                    in 
-                        (* Sends the snapshot if the followers nextIndex is before the Snapshot's lastIncludedIndex *)
-                        if nextIndex.next <= node.log.snapshot.lastIncludedIndex 
-                            then send(follower_pid, ("Snapshot", node.log.snapshot, p_id, node.term))
-                        else 
-                            let val entries = get_commands_after_nth node.log latestLogIndex
-                                val afterSnapshot = latestLogIndex - node.log.snapshot.lastIncludedIndex
-                                val prevEntryTerm = 
-                                    if afterSnapshot > 0 then (get_nth_command node.log latestLogIndex).term 
-                                    else node.log.snapshot.lastIncludedTerm
-                            in send(follower_pid, ("AppendEntries", entries, p_id, node.term, latestLogIndex, prevEntryTerm, node.log.commitIndex))
-                        end
-                end
-                (* A follower should never get more entries than the leader *)
-                else print "ERROR"
-            end
 
-            (* Convert leader to follower *)
-            fun demote term leader voted_for node = 
-                (* Kill-function needed here to destroy state-machine, temporary solution *)
-                send(state_machine_pid, "SHUTDOWN");
-                {node with 
-                    term = term, 
-                    leader = leader,
-                    leader_info = (),
-                    voted_for = voted_for}
+    (* #IMPORT ./libs/dialer.trp *)
 
-            (* Applies all committed nodes that have not already been applied *)
-            fun apply_committed node = 
-                let val prev_commit = node.log.commitIndex
-                    val highest_commit = calc_highest_commit (map (fn x => x.match) node.leader_info.matchIndex)
-                    val node = { node with log = update_commit node.log highest_commit }
-                    val applied_log = apply_log node.log (fn x => send(state_machine_pid, x))
-                    val snapshot_log = 
-                        if prev_commit < highest_commit then 
-                            evaluate_snapshot_cond state_machine_pid node.hooks applied_log 
-                        else 
-                            applied_log
-                in { node with log = snapshot_log }
-            end
-                
-            val nonce = mkuuid ()
-            
-            fun loop node =
-                receive [
-                    hn ("SEND_HEARTBEAT", x) when nonce = x =>
-                        let val log = 
-                            verbose_print (node.id^": Sending heartbeat") node.verbose;
-                            err_timeout (fn () => add_internal_changes state_machine_pid node.hooks node.term node.log) node.log 
-                        in 
-                            
-                            leader_node ({node with log = log}) state_machine_pid end,
-
-                    (* Message has already been received and appended *)
-                    hn (("RAFT-UPDATE", x), dialer_id, serial_n) when serial_n = node.log.lastMessageSerial =>
-                        send(dialer_id, "DIALER-ACK");
-                        loop node,
-
-                    (* Message has not been appended before *)
-                    hn (("RAFT-UPDATE", x), dialer_id, serial_n) => 
-                        let val latestLogIndex = get_log_index node.log
-                            val prevLogTerm = get_latest_log_term node.log
-                            val log = append_message node.log (node.hooks.sethook x) node.term serial_n
-                            val leader_info = update_match_index node.leader_info p_id (get_log_index log)
-                            val leader_info = update_next_index leader_info p_id ((get_log_index log) + 1)
-                            val node = {node with log = log, leader_info = leader_info}
-                        in 
-                            verbose_print (node.id^": Appending new message to log") node.verbose;
-                            send(dialer_id, "DIALER-ACK");
-                            loop node end,
-
-                    hn (("RAFT-GET", x), dialer_id) =>
-                        send (state_machine_pid, (node.hooks.gethook x));
-                        send(dialer_id, "DIALER-ACK");
-                        loop node,
-
-                    (* If append is successful on a follower*)
-                    hn ("ACKNOWLEGDE", (peer, logIndex)) => 
-                        let val node = { node with leader_info = update_match_index node.leader_info peer logIndex }
-                            val node = { node with leader_info = update_next_index node.leader_info peer (logIndex + 1) }
-                        in loop (apply_committed node) end,
-                    
-                    (* If append is unsuccessful *)
-                    hn ("REJECT", (peer, terminfo, logIndex)) => 
-                        if node.term >= terminfo.term then 
-                            let val node = { node with leader_info = update_next_index node.leader_info peer ((min (get_log_index node.log) (logIndex)) + 1) } 
-                            in loop node 
-                            end
-                        else follower (demote terminfo.term terminfo.leader ()
-                        node),
-
-                    (* If another node has been elected as a candidate, and
-                        their term is in front of ours, convert to a follower *)
-                    hn ("RequestVote", (c_term, c_id, c_log_index, c_log_term)) when c_term > node.term =>
-                        verbose_print (node.id^": Voting yes") node.verbose;
-                        send(c_id, ("YES-VOTE", node.id));
-                        follower (demote c_term () c_id node),
-
-                    hn ("RequestVote", (c_term, c_id, c_log_index, c_log_term)) =>
-                        send(c_id, ("NO-VOTE", node.id));
-                        loop node,
-
-                    (* If we receive snapshot from a leader in a higher term,
-                    convert to follower *)
-                    hn ("Snapshot", snapshot, l_id, other_term) when other_term > node.term =>
-                        let val _ = verbose_print (node.id^": received Snapshot from leader, I must have lost position") node.verbose
-                        in follower (demote other_term l_id () node)
-                        end,
-                    
-                    (* If we receive AppendEntries from a leader in a higher term,
-                    convert to follower *)
-                    hn ("AppendEntries", x, l_id, other_term, prevIndex, prevTerm, commitIndex) when other_term > node.term => 
-                        verbose_print (node.id^": received AppendEntries from leader, I must have lost position") node.verbose;
-                        follower (demote other_term l_id () node),
-                    
-                    (* Prints log *)
-                    hn ("debug-printlog") =>
-                        pretty_print_log node.id node.log;
-                        print node.leader_info;
-                        loop node,
-
-                    (* Halts the leader *)
-                    hn ("debug-pause") =>
-                        let fun pause () = receive [
-                            hn ("debug-continue") => loop node,
-                            hn x => pause ()
-                        ]
-                        in pause () end,
-
-                    (* Applies a snapshot *)
-                    hn ("debug-applysnapshot") =>
-                        let 
-                            val snapshot = get_snapshot state_machine_pid node.state node.hooks node.log
-                            val node = case snapshot.snapshot of
-                            () => node
-                            | _ => {node with log = apply_snapshot state_machine_pid snapshot node.log}
-                        in 
-                            verbose_print (node.id^": applying snapshot") node.verbose;
-                            loop node end,
-
-                    (* Asks the state-machine for the snapshot condition *)
-                    hn ("debug-snapshotcond") =>
-                        print (evaluate_snapshot_cond state_machine_pid node.state node.hooks node.log);
-                        loop node,
-                    hn _ => loop node
-                ]
-        in 
-            (* Append entries for each follower *)
-            map (fn x => append_entries x) (filter (fn x => x <> p_id) node.all_nodes);
-            start_timeout (fn () => send (p_id, ("SEND_HEARTBEAT", nonce))) HEARTBEAT_INTERVAL;
-            loop node
+    (* Send the side-effect-messages to dialers or clusters *)
+    fun send_sides log sides =
+        (* Add message to key-value-store, sorting by the recipients. *)
+        let fun add_msg id msg sk dict = case dict of
+            [] => [(id, [(msg, sk)])]
+            | (other_id, msgs) :: t =>
+                if id = other_id then
+                    (id, (msg, sk) :: t)
+                else (other_id, msgs) :: add_msg id msg sk t
+            (* Generate key-value-store of all message, sorting by recipients. *)
+            val (sorted_msgs, _) = case sides of
+            [] => ([], 0)
+            | x => foldl (fn ((callback, msg), (acc, seq)) =>
+                (add_msg callback msg ({ id = callback, key = (log.lastApplied, seq)}) acc, seq + 1)
+            ) ([], 1) x
+        (* Sends all messages. *)
+        in map (fn x => raft_send x) sorted_msgs
     end
 
-    and candidate node =
-        let val p_id = self()
+    (* Applies all log-entries that have been committed, but not applied *)
+    fun apply_log log state_machine is_leader = 
+        (* If any non-applied, committed logs apply... *)
+        if log.lastApplied < log.commitIndex then
+            (* Get the latest non-applied committed entry *)
+            let val entry = get_nth_command log (log.lastApplied + 1) 
+                val command = entry.command
+                (* Update log to apply entry and apply entry on state-machine*)
+                val log = update_applied log
+                val (sides, status, step) = state_machine
+                val (new_sides, new_status, new_step) = step command
+            (* If leader is applying, execute side-effects. *)
+            in (if is_leader then
+                    entry.callback ();
+                    send_sides log new_sides
+                else ());
+            apply_log log (new_sides, new_status, new_step) is_leader end
+        else (log, state_machine)
 
-            (* A candidate cannot vote for anyone and has no leader *)
-            val node = {node with voted_for = (), leader = ()}
-            val nonce = mkuuid()
+    (* #IMPORT ./libs/nodes/leader.trp *)
+    (* #IMPORT ./libs/nodes/candidate.trp *)
+    (* #IMPORT ./libs/nodes/follower.trp *)
 
-            (* Sends a vote request to all followers *)
-            val latestLogIndex = get_log_index node.log
-            val prevLogTerm = get_latest_log_term node.log
-            
-
-            (* Becoming a leader requires majority vote *)
-            val req_votes = ((length node.all_nodes) / 2)
-            
-            fun won_election () = 
-                let val (starting_state, log) = get_startup_log_state_pair (node.empty_state, node.log)
-                    val state_machine_pid = spawn(fn () => node.state_machine starting_state)
-                    val applied_log = apply_log log (fn x => send(state_machine_pid, x))
-                in
-                    verbose_print (node.id^": I won the election") node.verbose;
-                    leader_node ({ 
-                        node with leader_info = (new_leader node.all_nodes node.log),
-                        leader = p_id,
-                        log = applied_log}) state_machine_pid
-            end
-            
-            fun wait_for_votes (follower_votes, vote_amount) = 
-                let 
-                    fun loop () = receive [
-                    (* Received a vote from a follower we have not already
-                    received a vote from *)
-                    hn ("YES-VOTE", follower_id) when (not (contains follower_id follower_votes)) => 
-                        wait_for_votes ((append follower_votes [follower_id]), vote_amount + 1),
-
-                    (*We received a no-vote from a follower in a later term.
-                    This can only happen if there is a leader/candidate in this
-                    term, and as such, we convert to a follower *)
-                    hn ("NO-VOTE", other_term) when other_term > node.term =>
-                        follower node,
-
-                    (* Received vote request from leader in later term *)
-                    hn ("RequestVote", (c_term, other_c_id, c_log_index, c_log_term)) when c_term > node.term =>
-                        let val _ = send(other_c_id, ("YES-VOTE", node.id))
-                        in follower ({ node with term = c_term, voted_for = other_c_id})
-                        end,
-                    
-                    (* Received message from leader in a term at least as
-                    up-to-date as ours. Because of this, we must have lost the
-                    election *)
-                    hn ("AppendEntries", x, l_id, other_term, prevIndex, prevTerm, commitIndex) when other_term >= node.term => 
-                        let val _ = verbose_print (node.id^": received AppendEntries from leader, I must have lost position") node.verbose
-                        in follower ({ node with leader = l_id})
-                        end,
-
-                    (* Election timeout, send out another request vote *)
-                    hn ("VOTE-TIMEOUT", x) when x = nonce => candidate {node with term = node.term + 1},
-
-                    (* Halts the candidate *)
-                    hn ("debug-pause") =>
-                        let fun loop () = receive [
-                            hn ("debug-continue") => (),
-                            hn x => loop ()
-                        ]
-                        in loop () end,
-                    hn _ => loop ()
-                ]
-                in if vote_amount >= req_votes then won_election () else loop ()
-            end
-        in 
-            verbose_print (node.id^": I am now a candidate") node.verbose;
-            send_to_all node.all_nodes ("RequestVote", (node.term, p_id, latestLogIndex, prevLogTerm)) (p_id);
-            start_random_timeout (fn () => send(p_id, ("VOTE-TIMEOUT", nonce)));
-            wait_for_votes ([node.id], 1) 
-    end
-    
-    and follower node = 
-        let val p_id = self()
-            val nonce = mkuuid()
-            val _ = start_random_timeout (fn () => send(p_id, ("ELECTION-TIMEOUT", nonce)))
-            
-            (* Sends a yes-vote to a candidate *)
-            fun vote_for c_id c_term node = 
-                send(c_id, ("YES-VOTE", node.id));
-                { node with term = c_term, voted_for = c_id } 
-            fun loop node = let
-                fun start_election () =
-                    let val _ = verbose_print (node.id^": START ELECTION") node.verbose
-                    in candidate ({node with term = node.term + 1})
-                    end
-                val _ = receive [
-                    (* Starts an election *)
-                    hn ("ELECTION-TIMEOUT", x) when x = nonce => start_election (),
-
-                    (* Sends a re-vote to a candidate we already voted for *)
-                    hn ("RequestVote", (c_term, c_id, c_log_index, c_log_term)) when c_id = node.voted_for =>
-                        verbose_print (node.id^": Voting yes") node.verbose;
-                        follower (vote_for c_id c_term node),
-                    
-                    (* If we receive a vote request, vote yes if: the log is a
-                    up-to-date and the term of the candidate is later than our
-                    current. Vote no otherwise *)
-                    hn ("RequestVote", (c_term, c_id, c_log_index, c_log_term)) =>
-                        let val latestLogIndex = get_log_index node.log
-                            val latestLogTerm = get_latest_log_term node.log
-                            fun no_vote () =
-                                send(c_id, "NO-VOTE");
-                                verbose_print (node.id^":voting no") node.verbose;
-                                follower node
-                            fun yes_vote () =
-                                verbose_print (node.id^": Voting yes") node.verbose;
-                                follower (vote_for c_id c_term node)
-                        in 
-                            if latestLogIndex > c_log_index then no_vote ()
-                            else if latestLogTerm > c_log_term then no_vote ()
-                            else if c_term <= node.term then no_vote ()
-                            else yes_vote ()
-                        end,
-
-                    (* When receiving a snapshot from a leader in a later or
-                    same term, acknowledge if it contains entries past our
-                    current log index. Update leader and term accordingly. *) 
-                    hn ("Snapshot", x, l_id, leader_term) => 
-                        let val node = {node with leader = 
-                                if node.leader = () orelse node.term < leader_term then l_id 
-                                else node.leader} 
-
-                            val {snapshot, lastIncludedIndex, lastIncludedTerm} = x 
-                            val log_term = get_latest_log_term node.log 
-                            val log_index = get_log_index node.log
-
-                            val accepting = 
-                                if leader_term < node.term then false
-                                else if lastIncludedIndex <= log_index then false
-                                else true
-
-                            val newlog = if accepting then apply_snapshot node.state_machine_pid x node.log else node.log
-                            val reject = fn () => send (l_id, ("REJECT", (p_id, {term = term, leader = leader}, (get_log_index newlog))))
-                            val ack = fn () => send (l_id, ("ACKNOWLEGDE", (p_id, get_log_index newlog)))
-
-                            val newlog = if accepting then apply_snapshot node.state_machine_pid x node.log else node.log
-                            val reject = 
-                                fn () => send (l_id, ("REJECT", (p_id, {term = node.term, leader = node.leader}, (get_log_index newlog))))
-                            val ack = 
-                                fn () => send (l_id, ("ACKNOWLEGDE", (p_id, get_log_index newlog)))
-
-                            val node = {node with term = (if node.term < leader_term then leader_term else node.term)}
-                            
-                        in 
-                            (if accepting then ack ()
-                                    else reject ());
-                            follower {node with log = newlog}
-                        end,
-
-                    (* When receiving entries from a leader in a later or
-                    same term, acknowledge if it contains entries past our
-                    current log index. And if the latest log index matches ours.
-                    Update log accordingly.*)
-                    hn ("AppendEntries", x, l_id, leader_term, latestLogIndex, prevLogTerm, leaderCommit) => 
-                        let val node = {node with leader = 
-                                if node.leader = () orelse node.term <= leader_term then l_id
-                                else node.leader}
-                            val accepting = 
-                                if leader_term < node.term then false
-                                else if latestLogIndex > (get_log_index node.log) then 
-                                    false
-                                else if (get_latest_log_term node.log) <> prevLogTerm andalso prevLogTerm > 0 then 
-                                    false
-                                else true
-                            val newlog = 
-                                if accepting then
-                                    let val log = rollback_log_to node.log latestLogIndex
-                                        val log = add_entries_to_log log x leader_term
-                                    in update_commit log (min leaderCommit (get_log_index log)) 
-                                    end
-                                else node.log
-                            val reject = 
-                                fn () => send (l_id, ("REJECT", (p_id, {term = node.term, leader = node.leader}, (get_log_index newlog))))
-                            val ack = 
-                                fn () => send (l_id, ("ACKNOWLEGDE", (p_id, get_log_index newlog)))
-
-                            val node = {node with term = (if node.term < leader_term then leader_term else node.term)}
-                            val _ = if accepting then ack ()
-                                    else 
-                                        let val _ = verbose_print (node.id^": REJECTING") node.verbose
-                                        in reject ()
-                                        end
-                        in follower {node with log = newlog}
-                        end,
-
-                    (* If client sends update, sends the leader's id *)
-                    hn (("RAFT-UPDATE", x), dialer_id, serial_n) => 
-                        send(dialer_id, ("NOT-LEADER", node.leader)),
-                    
-                    (* If client sends get, send the leader's id*)
-                    hn (("RAFT-GET", x), dialer_id) => 
-                        send(dialer_id, ("NOT-LEADER", node.leader)),
-
-                    (* Prints the log *)
-                    hn ("debug-printlog") =>
-                        pretty_print_log node.id node.log,
-
-                    (* Halts the follower *)
-                    hn ("debug-pause") =>
-                        let fun loop () = receive [
-                            hn ("debug-continue") => (),
-                            hn x => loop ()
-                        ]
-                        in loop () end,
-
-                    (* Start an election, electing this follower to a candidate
-                    *)
-                    hn ("debug-timeout") => start_election (),
-                    hn _ => 
-                        loop node
-            ]
-            in loop node
-        end
-        in loop node
-    end
-
+    (* A node is dormant until it has received the references of all other nodes. *)
     fun dormant_node node =
         if length(node.all_nodes) < node.node_amount then
             receive [
                 (* Adds a node to the cluster, only used for initialization *)
-                hn ("ADD_NODES", x) => 
+                hn (ADD_NODES, x) => 
                     dormant_node ({node with all_nodes = append node.all_nodes x})
             ]
         else follower node
     
     (* Defines a default node, being a follower in term 1 without a leader and
     the state-machine in its beginning state *)
-    fun default_node id all_nodes node_amount state_machine init_state hooks verbose = 
+    fun default_node id all_nodes node_amount state_machine snapshot_cond verbose = 
         let val node = {
             all_nodes = all_nodes,
             id = id,
@@ -535,26 +216,28 @@ let
             voted_for = (),
             leader = (),
             leader_info = (),
-            state_machine = state_machine,
-            empty_state = init_state,
-            hooks = hooks,
+            state_machine = case state_machine of
+                (_, _, _) => state_machine
+                | _ => ([], WAIT, fn x => x ()),
+            snapshot_cond = snapshot_cond,
             node_amount = node_amount,
+            serialkeys = [],
             verbose = verbose
         }
-        in fn() => printString (id^": Starting node..."); dormant_node node
+        in dormant_node node
     end
 
     (* Spawn a state-machine on a seperate thread, creates a record*)
-    fun initiate_node state_machine init_state hooks node_amount id verbose = 
-        spawn (default_node id [] node_amount state_machine init_state hooks verbose)
+    fun initiate_node state_machine snapshot_cond node_amount id verbose = 
+        spawn (fn () => default_node id [] node_amount state_machine snapshot_cond verbose)
 
     (* Sends a list of all nodes to all nodes *)
     fun add_refs nodes = 
-        map (fn x => send(x, ("ADD_NODES", nodes))) nodes
+        map (fn x => send(x, (ADD_NODES, nodes))) nodes
     
     (* Spawn n nodes*)
-    fun initiate_nodes n state_machine init_state hooks verbose =
-        let val part_init = initiate_node state_machine init_state hooks n
+    fun initiate_nodes n state_machine snapshot_cond verbose =
+        let val part_init = initiate_node state_machine snapshot_cond n
             fun spawn_nodes n acc_id =
                 case n of
                 0 => []
@@ -569,11 +252,11 @@ let
     end
 
     (* Spawn a state-machine on some alias *)
-    fun initiate_distributed_node state_machine init_state hooks node_amount id alias verbose = 
-        spawn(alias, (default_node id [] state_machine init_state hooks node_amount verbose))
+    fun initiate_distributed_node state_machine snapshot_cond node_amount id alias verbose = 
+        spawn(alias, fn () => (default_node id [] node_amount state_machine snapshot_cond verbose))
 
-    fun initiate_distributed_nodes aliases state_machine init_state hooks verbose =
-        let val part_init = initiate_distributed_node state_machine init_state hooks (length(aliases))
+    fun initiate_distributed_nodes aliases state_machine snapshot_cond verbose =
+        let val part_init = initiate_distributed_node state_machine snapshot_cond (length(aliases))
             fun spawn_nodes acc acc_id =
                 case acc of 
                 [] => []
@@ -584,100 +267,49 @@ let
             add_refs nodes;
             nodes
     end
-                    
-    (* Facilitates client-side interaction to the Raft cluster *)
-    fun dialer cluster = 
-        let val p_id = self()
-            fun random_leader () =
-                let fun roundUp n m = 
-                        if n <= 0 then m else roundUp (n - 1) (m + 1)
-                    val r_n = roundUp (random() * (length cluster - 1)) 0 
-                in nth cluster r_n
-            end
-            val leader = random_leader ()
 
-            fun send_message msg leader = let 
-                val nonce = mkuuid()
-                val msg_timeout = start_timeout (fn() => send(p_id, ("MESSAGE-TIMEOUT", nonce)))
-                fun wait () =
-                    receive [
-                    hn ("NOT-LEADER", leader_id) => 
-                        send_message msg leader_id,
-                    hn ("DIALER-ACK") => leader,
-                    hn ("MESSAGE-TIMEOUT", x) => 
-                        if x = nonce then send_message msg (random_leader ())
-                        else wait ()
-                ]
-                in
-                    (case leader of
-                    () => msg_timeout DIALER_NOLEADER_TIMEOUT
-                    | x =>
-                        msg_timeout DIALER_NOMSG_TIMEOUT; 
-                        send(x, msg));
-                    wait ()
-            end
+    (* Spawns a dialer, dialing into a cluster. *)
+    fun raft_dial (cluster, client_id) =
+        spawn(fn () => dialer cluster client_id)
 
-            fun update_message x leader = let 
-                val serial_n = mkuuid()
-                in send_message (("RAFT-UPDATE", x), p_id, serial_n) leader
-            end
-
-            fun get_message x leader = send_message (("RAFT-GET", x), p_id) leader
-
-
-            fun loop leader =     
-                let val leader = receive [
-                    hn ("RAFT-UPDATE", x) =>
-                        update_message x leader,
-
-                    hn ("RAFT-GET", x) =>
-                        get_message x leader,
-
-                    hn ("SEND-TO-NTH", n, x) =>
-                        send_to_nth cluster x n;
-                        leader,
-
-                    hn ("SEND-TO-ALL", x) => 
-                        send_to_all cluster x (self());
-                        leader,
-                    hn x => leader ]
-                in loop leader 
-            end
-        in loop leader
-    end
-
-    (* Spawns a distributed Raft network, and a dialer, which can be contacted to
+    (* Spawns a distributed Raft network, which can be dialed into to
     communicate with their state-machines *)
-    fun raft_d aliases state_machine init_state hooks verbose =
-        let val nodes = initiate_distributed_nodes aliases state_machine init_state hooks verbose
-        in spawn (fn () => dialer nodes)
-    end
+    fun raft_spawn_alias (state_machine, aliases, snapshot_cond, verbose) = 
+        initiate_distributed_nodes aliases state_machine snapshot_cond verbose
+    | raft_spawn_alias (state_machine, aliases) = 
+        raft_spawn_alias (state_machine, aliases, 50, false)
 
-    (* Spawns a Raft network, and a dialer, which can be contacted to
+    (* Spawns a Raft network, which can be contacted to
     communicate with their state-machines *)
-    fun raft n state_machine init_state hooks verbose =
-        let val nodes = initiate_nodes n state_machine init_state hooks verbose
-        in spawn (fn () => dialer nodes)
+    fun raft_spawn (state_machine, n, snapshot_cond, verbose) =
+        initiate_nodes n state_machine snapshot_cond verbose
+    | raft_spawn (state_machine) = raft_spawn (state_machine, 5, 50, false)
+
+    (*fun raft_d (state_machine, client_id, aliases, snapshot_cond, verbose) =
+        let val nodes = raft_spawn_alias (state_machine, aliases, snapshot_cond, verbose)
+        in (raft_dial (nodes, client_id), nodes)
     end
+    | raft_d (state_machine, client_id, aliases) = 
+        raft_d (state_machine, client_id, aliases, 50, false)
 
-    (* #IMPORT libs/state_machines/key-val.trp *)
+    fun raft (state_machine, client_id, n, snapshot_cond, verbose) =
+        let val nodes = raft_spawn (state_machine, n, snapshot_cond, verbose)
+        in (raft_dial (nodes, client_id), nodes)
+    end
+    | raft (state_machine, client_id) = 
+        raft (state_machine, client_id, 5, 50, false)
 
-    (* #IMPORT libs/state_machines/counter.trp *)
+    val default_aliases = ["@node1", "@node2", "@node3", "@node4", "@node5"]*)
 
-    (* #IMPORT libs/state_machines/epoch_counter.trp *)
-
-    (* #IMPORT libs/state_machines/ping.trp *)
-
-
-    (* #IMPORT libs/tests/key-val-tests.trp *)
-
-    (* #IMPORT libs/tests/counter-tests.trp *)
-
-    (* #IMPORT libs/tests/epoch-counter-tests.trp *)
-
-    (* #IMPORT libs/tests/ping-tests.trp *)
-
-    val default_aliases = ["@node1", "@node2", "@node3"]
-
-in ping_test3 ()
+in
+    [ ("raft_dial", raft_dial)
+    , ("raft_spawn_alias", raft_spawn_alias)
+    , ("raft_spawn", raft_spawn)
+    , ("WAIT", WAIT)
+    , ("SUS", SUS)
+    , ("DONE", DONE)
+    , ("RAFT_UPDATE", RAFT_UPDATE)
+    , ("CLIENT", CLIENT)
+    , ("CLUSTER", CLUSTER)
+    ]
 end
